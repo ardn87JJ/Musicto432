@@ -78,3 +78,10 @@ def test_upload_size_limit(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     assert response.status_code == 413
     assert "1 Mo" in response.json()["detail"]
+
+
+def test_progress_polling_is_not_rate_limited() -> None:
+    unknown_job = "a" * 32
+    with TestClient(app) as client:
+        responses = [client.get(f"/api/jobs/{unknown_job}") for _ in range(45)]
+    assert all(response.status_code == 404 for response in responses)

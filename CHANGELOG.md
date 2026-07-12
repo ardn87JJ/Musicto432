@@ -1,5 +1,10 @@
 # Journal des versions
 
+## 0.1.2 — 2026-07-12
+
+- Le suivi normal de la progression n’est plus compté dans la limite par minute.
+- Empêche l’erreur « Trop de requêtes » pendant les conversions longues.
+
 ## 0.1.1 — 2026-07-12
 
 - Corrige les permissions du stockage temporaire avec Podman/Docker Compose.
