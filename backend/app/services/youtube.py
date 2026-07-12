@@ -1,16 +1,68 @@
 import asyncio
 import ipaddress
+import json
 import socket
 from pathlib import Path
 from urllib.parse import urlparse
 
 from app.config import Settings
+from app.models import YouTubeMetadata
 
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 
 
 class YouTubeImportError(ValueError):
     pass
+
+
+async def inspect_youtube(url: str, settings: Settings) -> YouTubeMetadata:
+    checked_url = await validate_youtube_url(url)
+    process = await asyncio.create_subprocess_exec(
+        "yt-dlp",
+        "--dump-single-json",
+        "--skip-download",
+        "--no-playlist",
+        "--no-warnings",
+        "--socket-timeout",
+        "20",
+        "--",
+        checked_url,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45)
+    except asyncio.CancelledError:
+        process.kill()
+        await process.wait()
+        raise
+    except TimeoutError as exc:
+        process.kill()
+        await process.wait()
+        raise YouTubeImportError("La vérification du lien YouTube a expiré.") from exc
+    if process.returncode != 0:
+        detail = stderr.decode(errors="replace").strip().splitlines()
+        raise YouTubeImportError(
+            "Impossible de vérifier cette vidéo YouTube. "
+            + (detail[-1][:180] if detail else "")
+        )
+    try:
+        data = json.loads(stdout)
+        title = str(data["title"]).strip()
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise YouTubeImportError("Les informations de la vidéo sont incomplètes.") from exc
+    if data.get("_type") in {"playlist", "multi_video"} or data.get("is_live"):
+        raise YouTubeImportError("Les playlists et diffusions en direct ne sont pas acceptées.")
+    duration = float(data["duration"]) if data.get("duration") is not None else None
+    if duration and duration > settings.max_audio_duration_seconds:
+        raise YouTubeImportError("Cette vidéo dépasse la durée maximale autorisée.")
+    return YouTubeMetadata(
+        title=title[:300],
+        uploader=str(data.get("uploader") or data.get("channel") or "").strip()[:200] or None,
+        duration=duration,
+        thumbnail=str(data.get("thumbnail") or "")[:2048] or None,
+        webpage_url=checked_url,
+    )
 
 
 async def validate_youtube_url(url: str) -> str:

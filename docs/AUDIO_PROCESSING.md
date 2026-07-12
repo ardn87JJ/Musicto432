@@ -20,6 +20,8 @@ La variation en cents vaut :
 
 Toutes les fréquences musicales sont multipliées par ce rapport. Une composante à 440 Hz devient approximativement 432 Hz.
 
+Depuis la v0.4.0, l’utilisateur peut choisir une autre source et une autre cible entre 400 et 480 Hz. Le rapport général devient `cible / source`. Les deux valeurs sont validées côté serveur et ne sont jamais incorporées comme texte libre dans une commande shell.
+
 ## Pourquoi Rubber Band
 
 Changer simplement la fréquence d’échantillonnage ralentirait aussi la lecture et allongerait le morceau. Le pitch shifting de Rubber Band dissocie la hauteur du tempo. MusicTo432 exécute :

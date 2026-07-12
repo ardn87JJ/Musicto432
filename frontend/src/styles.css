@@ -94,6 +94,27 @@ h1 em { color: var(--accent); font-style: normal; }
 .rights-check { display: grid; grid-template-columns: 19px 1fr; align-items: start; gap: 11px; color: var(--muted); font-size: 13px; line-height: 1.45; cursor: pointer; }
 .rights-check input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--accent-strong); }
 .inline-warning { color: #efc36d; font-size: 13px; margin: 0; }
+.inspect-button { min-height: 42px; border: 1px solid rgba(158, 229, 139, .35); border-radius: 11px; color: var(--accent); background: rgba(158, 229, 139, .07); cursor: pointer; font-weight: 700; }
+.inspect-button:disabled { opacity: .45; cursor: not-allowed; }
+.youtube-preview { display: grid; grid-template-columns: 120px 1fr; gap: 13px; overflow: hidden; padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: #0a1016; }
+.youtube-preview img { width: 120px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; }
+.youtube-preview div { min-width: 0; align-self: center; }
+.youtube-preview strong, .youtube-preview span, .youtube-preview small { display: block; }
+.youtube-preview strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.youtube-preview span { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.youtube-preview small { margin-top: 7px; color: var(--accent); font-size: 10px; }
+
+.frequency-options { padding: 0; margin: 0 0 26px; border: 0; }
+.frequency-options legend { margin-bottom: 12px; color: var(--ink); font-weight: 600; font-size: 14px; }
+.frequency-grid { display: grid; grid-template-columns: 1fr 34px 1fr; align-items: end; gap: 8px; }
+.frequency-grid > label > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 11px; }
+.frequency-grid label > div { display: grid; grid-template-columns: 44px 44px minmax(62px, 1fr) 22px; align-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: #0a1016; }
+.frequency-grid button { height: 42px; border: 0; border-right: 1px solid var(--line); color: var(--muted); background: transparent; cursor: pointer; font-size: 12px; }
+.frequency-grid button.selected { color: #10200c; background: var(--accent); font-weight: 700; }
+.frequency-grid input { width: 100%; height: 42px; padding: 0 5px; border: 0; outline: 0; color: var(--ink); background: transparent; text-align: right; font-weight: 700; }
+.frequency-grid b { padding-right: 7px; color: var(--muted); font-size: 10px; }
+.frequency-arrow { padding-bottom: 13px; color: var(--accent); text-align: center; font-size: 20px; }
+.frequency-options .inline-warning { margin-top: 9px; }
 
 .output-options { padding: 0; margin: 0 0 28px; border: 0; }
 .output-options legend { margin-bottom: 12px; }
@@ -186,6 +207,7 @@ progress::-webkit-progress-value { background: var(--accent); border-radius: 10p
 .batch-details span { margin-top: 3px; color: var(--muted); font-size: 11px; }
 .batch-details progress { height: 3px; margin-top: 8px; }
 .batch-download { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; color: #10200c; background: var(--accent); text-decoration: none; font-size: 20px; font-weight: 700; }
+.batch-zip-button { margin-top: 20px; }
 
 footer { display: flex; align-items: center; gap: 14px; margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line); color: #65727a; }
 footer > span { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--accent); font: 700 10px/1 ui-sans-serif, system-ui, sans-serif; }
@@ -200,6 +222,10 @@ footer p { margin: 0; font-size: 11px; line-height: 1.4; }
   .mark span { margin-top: 22px; font-size: 20px; }
   .intro { font-size: 14px; }
   .format-grid { grid-template-columns: 1fr; }
+  .frequency-grid { grid-template-columns: 1fr; }
+  .frequency-arrow { padding: 0; transform: rotate(90deg); }
+  .youtube-preview { grid-template-columns: 96px 1fr; }
+  .youtube-preview img { width: 96px; }
   .feature-tabs { gap: 7px; }
   .feature-tabs button { padding: 12px 8px; font-size: 13px; }
   .analysis-metrics { grid-template-columns: 1fr; }

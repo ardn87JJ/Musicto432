@@ -1,14 +1,17 @@
+import io
 import math
 import shutil
 import subprocess
 import time
 import wave
+import zipfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, settings
+from app.models import YouTubeMetadata
 
 
 def has_rubberband() -> bool:
@@ -44,7 +47,11 @@ def test_complete_upload_download_delete_cycle(tmp_path: Path) -> None:
         created = client.post(
             "/api/jobs/upload",
             files={"file": ("api-tone.wav", audio, "audio/wav")},
-            data={"output_format": "flac"},
+            data={
+                "output_format": "flac",
+                "source_reference_hz": "440",
+                "target_reference_hz": "432",
+            },
         )
         assert created.status_code == 202
         job_id = created.json()["job_id"]
@@ -58,14 +65,57 @@ def test_complete_upload_download_delete_cycle(tmp_path: Path) -> None:
         assert state is not None
         assert state["status"] == "completed", state
         assert state["progress"] == 100
+        assert state["source_reference_hz"] == 440
+        assert state["target_reference_hz"] == 432
 
         download = client.get(f"/api/jobs/{job_id}/download")
         assert download.status_code == 200
         assert download.headers["content-type"].startswith("audio/flac")
         assert len(download.content) > 100
 
+        batch = client.post("/api/jobs/batch-download", json={"job_ids": [job_id]})
+        assert batch.status_code == 200
+        assert batch.headers["content-type"] == "application/zip"
+        with zipfile.ZipFile(io.BytesIO(batch.content)) as archive:
+            assert archive.namelist() == ["api-tone_432Hz.flac"]
+
         assert client.delete(f"/api/jobs/{job_id}").status_code == 204
         assert client.get(f"/api/jobs/{job_id}").status_code == 404
+
+
+def test_reject_identical_source_and_target_frequency(tmp_path: Path) -> None:
+    source = tmp_path / "same.wav"
+    make_short_tone(source)
+    with TestClient(app) as client, source.open("rb") as audio:
+        response = client.post(
+            "/api/jobs/upload",
+            files={"file": ("same.wav", audio, "audio/wav")},
+            data={"source_reference_hz": "432", "target_reference_hz": "432"},
+        )
+    assert response.status_code == 400
+    assert "doivent être différentes" in response.json()["detail"]
+
+
+def test_youtube_inspection_returns_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_inspect(url: str, _settings) -> YouTubeMetadata:
+        return YouTubeMetadata(
+            title="Titre vérifié",
+            uploader="Artiste",
+            duration=185,
+            thumbnail="https://i.ytimg.com/example.jpg",
+            webpage_url=url,
+        )
+
+    monkeypatch.setattr("app.main.inspect_youtube", fake_inspect)
+    monkeypatch.setattr("app.main.shutil.which", lambda _: "/usr/local/bin/yt-dlp")
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/youtube/inspect",
+            json={"url": "https://youtu.be/abcdefghijk", "rights_confirmed": True},
+        )
+    assert response.status_code == 200
+    assert response.json()["title"] == "Titre vérifié"
+    assert response.json()["duration"] == 185
 
 
 def test_upload_size_limit(monkeypatch: pytest.MonkeyPatch) -> None:

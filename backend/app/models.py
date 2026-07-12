@@ -35,6 +35,8 @@ class JobPublic(BaseModel):
     error: str | None = None
     expires_at: datetime | None = None
     download_name: str | None = None
+    source_reference_hz: float
+    target_reference_hz: float
 
 
 class JobCreated(BaseModel):
@@ -46,6 +48,26 @@ class YouTubeRequest(BaseModel):
     url: str = Field(min_length=10, max_length=2048)
     rights_confirmed: bool
     output_format: OutputFormat = OutputFormat.MP3
+    source_reference_hz: float = Field(default=440, ge=400, le=480)
+    target_reference_hz: float = Field(default=432, ge=400, le=480)
+    title: str | None = Field(default=None, max_length=300)
+
+
+class YouTubeInspectRequest(BaseModel):
+    url: str = Field(min_length=10, max_length=2048)
+    rights_confirmed: bool
+
+
+class YouTubeMetadata(BaseModel):
+    title: str
+    uploader: str | None = None
+    duration: float | None = None
+    thumbnail: str | None = None
+    webpage_url: str
+
+
+class BatchDownloadRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1, max_length=50)
 
 
 class AnalysisYouTubeRequest(BaseModel):

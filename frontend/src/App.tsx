@@ -2,17 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   deleteAnalysis,
   deleteJob,
+  downloadBatch,
   downloadUrl,
   getAnalysis,
   getCapabilities,
   getJob,
+  inspectYoutube,
   submitYoutube,
   submitYoutubeAnalysis,
   uploadAnalysis,
   uploadFile,
 } from './api'
 import { strings } from './strings'
-import type { Analysis, Capabilities, Job, OutputFormat } from './types'
+import type { Analysis, Capabilities, Job, OutputFormat, YouTubeMetadata } from './types'
 import './styles.css'
 
 const ALLOWED_EXTENSIONS = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg']
@@ -31,6 +33,12 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} Mo`
 }
 
+function formatDuration(seconds: number | null): string {
+  if (seconds === null) return 'Durée inconnue'
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}:${Math.round(seconds % 60).toString().padStart(2, '0')}`
+}
+
 function App() {
   const [feature, setFeature] = useState<'convert' | 'analyze'>('convert')
   const [mode, setMode] = useState<'file' | 'youtube'>('file')
@@ -38,6 +46,8 @@ function App() {
   const [url, setUrl] = useState('')
   const [rights, setRights] = useState(false)
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('mp3')
+  const [sourceReferenceHz, setSourceReferenceHz] = useState(440)
+  const [targetReferenceHz, setTargetReferenceHz] = useState(432)
   const [job, setJob] = useState<Job | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
@@ -48,6 +58,8 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null)
   const [batchItems, setBatchItems] = useState<BatchItem[]>([])
   const [batchRunning, setBatchRunning] = useState(false)
+  const [youtubeMetadata, setYoutubeMetadata] = useState<YouTubeMetadata | null>(null)
+  const [youtubeInspecting, setYoutubeInspecting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const batchRunningRef = useRef(false)
   const batchCancelledRef = useRef(false)
@@ -97,7 +109,11 @@ function App() {
 
   const working = Boolean(jobId && (!job || job.status === 'queued' || job.status === 'processing'))
   const analyzing = Boolean(analysisId && (!analysis || analysis.status === 'queued' || analysis.status === 'processing'))
-  const canSubmit = mode === 'file' ? files.length > 0 : Boolean(url.trim() && rights && capabilities?.youtube_available)
+  const validFrequencyChange = sourceReferenceHz >= 400 && sourceReferenceHz <= 480
+    && targetReferenceHz >= 400 && targetReferenceHz <= 480
+    && Math.abs(sourceReferenceHz - targetReferenceHz) >= 0.001
+  const canSubmitSource = mode === 'file' ? files.length > 0 : Boolean(url.trim() && rights && capabilities?.youtube_available)
+  const canSubmit = canSubmitSource && (feature === 'analyze' || validFrequencyChange)
 
   const chooseFiles = (selected: File[]) => {
     if (!selected.length) return
@@ -137,9 +153,15 @@ function App() {
       const candidate = files[index]
       try {
         updateBatchItem(index, { status: 'uploading', progress: 0 })
-        const created = await uploadFile(candidate, outputFormat, (progress) => {
+        const created = await uploadFile(
+          candidate,
+          outputFormat,
+          sourceReferenceHz,
+          targetReferenceHz,
+          (progress) => {
           updateBatchItem(index, { progress: Math.round(progress * 0.1) })
-        })
+          },
+        )
         batchCurrentIdRef.current = created.job_id
         setJobId(created.job_id)
         updateBatchItem(index, { status: 'processing', jobId: created.job_id, progress: 10 })
@@ -200,10 +222,22 @@ function App() {
       let created: { job_id: string }
       if (mode === 'file' && file) {
         setUploadProgress(0)
-        created = await uploadFile(file, outputFormat, setUploadProgress)
+        created = await uploadFile(
+          file,
+          outputFormat,
+          sourceReferenceHz,
+          targetReferenceHz,
+          setUploadProgress,
+        )
         setUploadProgress(null)
       } else {
-        created = await submitYoutube(url.trim(), outputFormat)
+        created = await submitYoutube(
+          url.trim(),
+          outputFormat,
+          sourceReferenceHz,
+          targetReferenceHz,
+          youtubeMetadata?.title,
+        )
       }
       setJobId(created.job_id)
     } catch (caught) {
@@ -246,6 +280,32 @@ function App() {
     setFiles([])
     setNotice(null)
     setError(null)
+  }
+
+  const downloadCompletedBatch = async () => {
+    const ids = batchItems.flatMap((item) => (
+      item.status === 'completed' && item.jobId ? [item.jobId] : []
+    ))
+    if (!ids.length) return
+    try {
+      await downloadBatch(ids)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Le téléchargement groupé a échoué.')
+    }
+  }
+
+  const previewYoutube = async () => {
+    if (!url.trim() || !rights) return
+    setYoutubeInspecting(true)
+    setYoutubeMetadata(null)
+    setError(null)
+    try {
+      setYoutubeMetadata(await inspectYoutube(url.trim()))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'La vidéo YouTube n’a pas pu être vérifiée.')
+    } finally {
+      setYoutubeInspecting(false)
+    }
   }
 
   const analyze = async () => {
@@ -347,11 +407,23 @@ function App() {
             ) : (
               <div key="youtube-mode" className="youtube-panel">
                 <label htmlFor="youtube-url">Adresse de la vidéo YouTube</label>
-                <input id="youtube-url" type="url" inputMode="url" placeholder="https://youtu.be/…" value={url} onChange={(event) => setUrl(event.target.value)} />
+                <input id="youtube-url" type="url" inputMode="url" placeholder="https://youtu.be/…" value={url} onChange={(event) => { setUrl(event.target.value); setYoutubeMetadata(null) }} />
                 {capabilities && !capabilities.youtube_available && <p className="inline-warning">L’import YouTube est indisponible sur ce serveur. L’import de fichier reste actif.</p>}
                 <label className="rights-check"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} /><span>Je confirme disposer des droits ou de l’autorisation nécessaires pour télécharger et transformer ce contenu.</span></label>
+                <button className="inspect-button" disabled={!url.trim() || !rights || youtubeInspecting} onClick={() => void previewYoutube()}>{youtubeInspecting ? 'Vérification…' : 'Vérifier la vidéo'}</button>
+                {youtubeMetadata && <div className="youtube-preview">{youtubeMetadata.thumbnail && <img src={youtubeMetadata.thumbnail} alt="" referrerPolicy="no-referrer" />}<div><strong>{youtubeMetadata.title}</strong><span>{youtubeMetadata.uploader ?? 'Créateur inconnu'} · {formatDuration(youtubeMetadata.duration)}</span><small>Vidéo vérifiée avant traitement</small></div></div>}
               </div>
             )}
+
+            <fieldset className="frequency-options">
+              <legend>Changement d’accordage</legend>
+              <div className="frequency-grid">
+                <label><span>Fréquence source</span><div><button type="button" className={sourceReferenceHz === 432 ? 'selected' : ''} onClick={() => setSourceReferenceHz(432)}>432</button><button type="button" className={sourceReferenceHz === 440 ? 'selected' : ''} onClick={() => setSourceReferenceHz(440)}>440</button><input type="number" min="400" max="480" step="0.1" aria-label="Fréquence source personnalisée" value={sourceReferenceHz} onChange={(event) => setSourceReferenceHz(Number(event.target.value))} /><b>Hz</b></div></label>
+                <span className="frequency-arrow" aria-hidden="true">→</span>
+                <label><span>Fréquence cible</span><div><button type="button" className={targetReferenceHz === 432 ? 'selected' : ''} onClick={() => setTargetReferenceHz(432)}>432</button><button type="button" className={targetReferenceHz === 440 ? 'selected' : ''} onClick={() => setTargetReferenceHz(440)}>440</button><input type="number" min="400" max="480" step="0.1" aria-label="Fréquence cible personnalisée" value={targetReferenceHz} onChange={(event) => setTargetReferenceHz(Number(event.target.value))} /><b>Hz</b></div></label>
+              </div>
+              {!validFrequencyChange && <p className="inline-warning">Choisissez deux fréquences différentes, comprises entre 400 et 480 Hz.</p>}
+            </fieldset>
 
             <fieldset className="output-options">
               <legend>Format du résultat</legend>
@@ -365,7 +437,7 @@ function App() {
               </div>
             </fieldset>
 
-            <button className="primary-button" disabled={!canSubmit || Boolean(serviceUnavailable)} onClick={() => void convert()}><span>Convertir en 432 Hz</span><span aria-hidden="true">→</span></button>
+            <button className="primary-button" disabled={!canSubmit || Boolean(serviceUnavailable)} onClick={() => void convert()}><span>Convertir vers {targetReferenceHz} Hz</span><span aria-hidden="true">→</span></button>
           </>
         )}
 
@@ -386,8 +458,8 @@ function App() {
             <div className="success-icon" aria-hidden="true">✓</div>
             <p className="eyebrow">CONVERSION TERMINÉE</p>
             <h2>Votre morceau est prêt</h2>
-            <p>Hauteur déplacée de −31,77 cents, durée et tempo préservés.</p>
-            <div className="preview result"><span>Résultat 432 Hz</span><audio controls src={downloadUrl(job.job_id)}>Votre navigateur ne peut pas lire ce fichier.</audio></div>
+            <p>Hauteur déplacée de {(1200 * Math.log2(job.target_reference_hz / job.source_reference_hz)).toFixed(2)} cents, durée et tempo préservés.</p>
+            <div className="preview result"><span>Résultat {job.target_reference_hz} Hz</span><audio controls src={downloadUrl(job.job_id)}>Votre navigateur ne peut pas lire ce fichier.</audio></div>
             <a className="primary-button" href={downloadUrl(job.job_id)} download={job.download_name ?? undefined}><span>Télécharger le fichier</span><span aria-hidden="true">↓</span></a>
             <button className="secondary-button new-track-button" onClick={() => void reset()}>＋ Convertir un autre morceau</button>
             {job.expires_at && <small className="expiry">Téléchargement disponible temporairement.</small>}
@@ -406,6 +478,7 @@ function App() {
                 </article>
               ))}
             </div>
+            {!batchRunning && batchItems.some((item) => item.status === 'completed') && <button className="primary-button batch-zip-button" onClick={() => void downloadCompletedBatch()}><span>Télécharger tous les résultats</span><span aria-hidden="true">ZIP ↓</span></button>}
             {!batchRunning && <button className="secondary-button new-track-button" onClick={() => void resetBatch()}>＋ Convertir d’autres morceaux</button>}
           </section>
         )}
@@ -436,9 +509,11 @@ function App() {
             ) : (
               <div key="analysis-youtube-mode" className="youtube-panel">
                 <label htmlFor="analysis-youtube-url">Adresse de la vidéo YouTube</label>
-                <input id="analysis-youtube-url" type="url" inputMode="url" placeholder="https://youtu.be/…" value={url} onChange={(event) => setUrl(event.target.value)} />
+                <input id="analysis-youtube-url" type="url" inputMode="url" placeholder="https://youtu.be/…" value={url} onChange={(event) => { setUrl(event.target.value); setYoutubeMetadata(null) }} />
                 {capabilities && !capabilities.youtube_available && <p className="inline-warning">L’import YouTube est indisponible sur ce serveur.</p>}
                 <label className="rights-check"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} /><span>Je confirme disposer des droits ou de l’autorisation nécessaires pour télécharger et analyser ce contenu.</span></label>
+                <button className="inspect-button" disabled={!url.trim() || !rights || youtubeInspecting} onClick={() => void previewYoutube()}>{youtubeInspecting ? 'Vérification…' : 'Vérifier la vidéo'}</button>
+                {youtubeMetadata && <div className="youtube-preview">{youtubeMetadata.thumbnail && <img src={youtubeMetadata.thumbnail} alt="" referrerPolicy="no-referrer" />}<div><strong>{youtubeMetadata.title}</strong><span>{youtubeMetadata.uploader ?? 'Créateur inconnu'} · {formatDuration(youtubeMetadata.duration)}</span><small>Vidéo vérifiée avant analyse</small></div></div>}
               </div>
             )}
 
@@ -474,12 +549,12 @@ function App() {
               <div><span>Confiance</span><strong>{analysis.result.confidence}%</strong></div>
             </div>
             <div className="confidence-bar"><i style={{ width: `${analysis.result.confidence}%` }} /></div>
-            {analysis.result.classification === '440' && <button className="primary-button" onClick={() => setFeature('convert')}><span>Convertir ce morceau en 432 Hz</span><span aria-hidden="true">→</span></button>}
+            {analysis.result.classification !== 'uncertain' && <button className="primary-button" onClick={() => { setSourceReferenceHz(analysis.result!.estimated_reference_hz); setTargetReferenceHz(432); setFeature('convert') }}><span>Convertir ce morceau vers 432 Hz</span><span aria-hidden="true">→</span></button>}
             <button className="secondary-button new-track-button" onClick={() => void resetAnalysis()}>＋ Analyser un autre morceau</button>
           </section>
         )}
 
-        <footer><span>{feature === 'convert' ? '440 → 432' : '432 · 440'}</span><p>{feature === 'convert' ? 'La conversion applique un décalage relatif sans modifier le tempo.' : 'L’estimation dépend des notes stables réellement présentes dans le morceau.'}</p></footer>
+        <footer><span>{feature === 'convert' ? `${sourceReferenceHz} → ${targetReferenceHz}` : '432 · 440'}</span><p>{feature === 'convert' ? 'La conversion applique un décalage relatif sans modifier le tempo.' : 'L’estimation dépend des notes stables réellement présentes dans le morceau.'}</p></footer>
       </section>
     </main>
   )

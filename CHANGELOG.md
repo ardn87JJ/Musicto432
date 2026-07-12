@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 0.4.0 — 2026-07-13
+
+- Ajoute le choix de la fréquence source et cible entre 400 et 480 Hz.
+- Calcule le rapport de pitch côté serveur et refuse une source identique à la cible.
+- Ajoute le téléchargement ZIP de tous les résultats d’une file.
+- Ajoute la vérification YouTube avant traitement : titre, créateur, durée et miniature.
+- Utilise le titre YouTube vérifié pour nommer le résultat.
+
 ## 0.3.0 — 2026-07-12
 
 - Ajoute une file de conversion pour traiter plusieurs fichiers successivement.

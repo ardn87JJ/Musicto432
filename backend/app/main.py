@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
 import shutil
+import tempfile
+import zipfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,18 +11,22 @@ from typing import Annotated
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 from app.config import get_settings
 from app.models import (
     AnalysisCreated,
     AnalysisPublic,
     AnalysisYouTubeRequest,
+    BatchDownloadRequest,
     CapabilitiesResponse,
     HealthResponse,
     JobCreated,
     JobPublic,
     JobStatus,
     OutputFormat,
+    YouTubeInspectRequest,
+    YouTubeMetadata,
     YouTubeRequest,
 )
 from app.rate_limit import RateLimitMiddleware
@@ -28,8 +34,17 @@ from app.services.analysis_jobs import AnalysisManager, AnalysisNotFoundError
 from app.services.jobs import JobManager, JobNotFoundError
 from app.services.media import MediaValidationError, sanitize_filename, validate_extension
 from app.services.system import command_available, rubberband_available, temp_directory_accessible
+from app.services.youtube import YouTubeImportError, inspect_youtube
 
 settings = get_settings()
+
+
+def validate_reference_change(source: float, target: float) -> None:
+    if abs(source - target) < 0.001:
+        raise HTTPException(
+            status_code=400,
+            detail="La fréquence source et la fréquence cible doivent être différentes.",
+        )
 
 
 async def cleanup_loop(app: FastAPI) -> None:
@@ -150,13 +165,21 @@ async def save_upload(upload: UploadFile, target: Path) -> None:
 async def upload_job(
     file: Annotated[UploadFile, File()],
     output_format: Annotated[OutputFormat, Form()] = OutputFormat.MP3,
+    source_reference_hz: Annotated[float, Form(ge=400, le=480)] = 440,
+    target_reference_hz: Annotated[float, Form(ge=400, le=480)] = 432,
 ) -> JobCreated:
+    validate_reference_change(source_reference_hz, target_reference_hz)
     filename = sanitize_filename(file.filename or "audio")
     try:
         suffix = validate_extension(filename)
     except MediaValidationError as exc:
         raise HTTPException(status_code=415, detail=str(exc)) from exc
-    record = await app.state.jobs.create(output_format, filename)
+    record = await app.state.jobs.create(
+        output_format,
+        filename,
+        source_reference_hz,
+        target_reference_hz,
+    )
     source_path = record.directory / f"source{suffix}"
     try:
         await save_upload(file, source_path)
@@ -176,9 +199,67 @@ async def youtube_job(payload: YouTubeRequest) -> JobCreated:
             status_code=400,
             detail="Vous devez confirmer disposer des droits nécessaires.",
         )
-    record = await app.state.jobs.create(payload.output_format, "youtube-audio")
+    validate_reference_change(payload.source_reference_hz, payload.target_reference_hz)
+    record = await app.state.jobs.create(
+        payload.output_format,
+        f"{payload.title}.audio" if payload.title else "youtube-audio",
+        payload.source_reference_hz,
+        payload.target_reference_hz,
+    )
     app.state.jobs.start_youtube(record, payload.url)
     return JobCreated(job_id=record.job_id, status=JobStatus.QUEUED)
+
+
+@app.post("/api/youtube/inspect", response_model=YouTubeMetadata)
+async def youtube_inspect(payload: YouTubeInspectRequest) -> YouTubeMetadata:
+    if not settings.youtube_enabled or shutil.which("yt-dlp") is None:
+        raise HTTPException(status_code=503, detail="L’import YouTube est indisponible.")
+    if not payload.rights_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Confirmez d’abord disposer des droits nécessaires.",
+        )
+    try:
+        return await inspect_youtube(payload.url, settings)
+    except YouTubeImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/batch-download")
+async def batch_download(payload: BatchDownloadRequest) -> FileResponse:
+    records = []
+    for job_id in dict.fromkeys(payload.job_ids):
+        record = await app.state.jobs.get(job_id)
+        if record.status != JobStatus.COMPLETED or not record.result_path:
+            raise HTTPException(
+                status_code=409,
+                detail="Un résultat de la sélection n’est pas prêt.",
+            )
+        if not record.result_path.is_file():
+            raise HTTPException(status_code=410, detail="Un résultat de la sélection a expiré.")
+        records.append(record)
+    with tempfile.NamedTemporaryFile(
+        prefix="musicto432-batch-", suffix=".zip", dir=settings.temp_root, delete=False
+    ) as archive_file:
+        archive_path = Path(archive_file.name)
+    used_names: set[str] = set()
+    try:
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for index, record in enumerate(records, start=1):
+                name = record.download_name or f"resultat-{index}.{record.output_format.value}"
+                if name in used_names:
+                    name = f"{Path(name).stem}-{index}{Path(name).suffix}"
+                used_names.add(name)
+                archive.write(record.result_path, arcname=name)
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename="MusicTo432_resultats.zip",
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
+    )
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobPublic)

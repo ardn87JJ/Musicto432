@@ -1,4 +1,4 @@
-import type { Analysis, Capabilities, Job, OutputFormat } from './types'
+import type { Analysis, Capabilities, Job, OutputFormat, YouTubeMetadata } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
 
@@ -20,6 +20,8 @@ export async function getCapabilities(): Promise<Capabilities> {
 export function uploadFile(
   file: File,
   outputFormat: OutputFormat,
+  sourceReferenceHz: number,
+  targetReferenceHz: number,
   onProgress: (progress: number) => void,
 ): Promise<{ job_id: string }> {
   return new Promise((resolve, reject) => {
@@ -37,6 +39,8 @@ export function uploadFile(
     const form = new FormData()
     form.append('file', file)
     form.append('output_format', outputFormat)
+    form.append('source_reference_hz', String(sourceReferenceHz))
+    form.append('target_reference_hz', String(targetReferenceHz))
     request.send(form)
   })
 }
@@ -44,11 +48,21 @@ export function uploadFile(
 export async function submitYoutube(
   url: string,
   outputFormat: OutputFormat,
+  sourceReferenceHz: number,
+  targetReferenceHz: number,
+  title?: string,
 ): Promise<{ job_id: string }> {
   const response = await fetch(`${API_BASE}/api/jobs/youtube`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, output_format: outputFormat, rights_confirmed: true }),
+    body: JSON.stringify({
+      url,
+      output_format: outputFormat,
+      source_reference_hz: sourceReferenceHz,
+      target_reference_hz: targetReferenceHz,
+      title,
+      rights_confirmed: true,
+    }),
   })
   if (!response.ok) throw new Error(await readError(response))
   return response.json() as Promise<{ job_id: string }>
@@ -66,6 +80,34 @@ export async function deleteJob(jobId: string): Promise<void> {
 
 export function downloadUrl(jobId: string): string {
   return `${API_BASE}/api/jobs/${jobId}/download`
+}
+
+export async function inspectYoutube(url: string): Promise<YouTubeMetadata> {
+  const response = await fetch(`${API_BASE}/api/youtube/inspect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, rights_confirmed: true }),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<YouTubeMetadata>
+}
+
+export async function downloadBatch(jobIds: string[]): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/jobs/batch-download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_ids: jobIds }),
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'MusicTo432_resultats.zip'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 export function uploadAnalysis(

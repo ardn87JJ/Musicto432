@@ -19,6 +19,8 @@ class JobRecord:
     directory: Path
     output_format: OutputFormat
     original_name: str
+    source_reference_hz: float
+    target_reference_hz: float
     status: JobStatus = JobStatus.QUEUED
     progress: int = 0
     stage: JobStage = JobStage.PREPARATION
@@ -38,6 +40,8 @@ class JobRecord:
             error=self.error,
             expires_at=self.expires_at,
             download_name=self.download_name,
+            source_reference_hz=self.source_reference_hz,
+            target_reference_hz=self.target_reference_hz,
         )
 
 
@@ -53,7 +57,13 @@ class JobManager:
         self._lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(settings.max_concurrent_jobs)
 
-    async def create(self, output_format: OutputFormat, original_name: str) -> JobRecord:
+    async def create(
+        self,
+        output_format: OutputFormat,
+        original_name: str,
+        source_reference_hz: float = 440,
+        target_reference_hz: float = 432,
+    ) -> JobRecord:
         job_id = uuid.uuid4().hex
         directory = self.settings.temp_root / job_id
         directory.mkdir(parents=True, exist_ok=False)
@@ -62,6 +72,8 @@ class JobManager:
             directory=directory,
             output_format=output_format,
             original_name=sanitize_filename(original_name),
+            source_reference_hz=source_reference_hz,
+            target_reference_hz=target_reference_hz,
         )
         async with self._lock:
             self._jobs[job_id] = record
@@ -115,7 +127,8 @@ class JobManager:
             record.progress = max(record.progress, 5)
             info = await probe_audio(source_path, self.settings)
             stem = Path(record.original_name).stem or "audio"
-            record.download_name = f"{stem}_432Hz.{record.output_format.value}"
+            target_label = f"{record.target_reference_hz:g}Hz"
+            record.download_name = f"{stem}_{target_label}.{record.output_format.value}"
             result_path = record.directory / f"result.{record.output_format.value}"
             record.stage = JobStage.CONVERSION
             record.progress = 10
@@ -130,6 +143,8 @@ class JobManager:
                 info,
                 self.settings,
                 update_progress,
+                record.source_reference_hz,
+                record.target_reference_hz,
             )
             record.stage = JobStage.FINALIZATION
             record.progress = 97

@@ -16,7 +16,11 @@ class ConversionError(RuntimeError):
 
 
 def build_ffmpeg_args(
-    input_path: Path, output_path: Path, output_format: OutputFormat
+    input_path: Path,
+    output_path: Path,
+    output_format: OutputFormat,
+    source_reference_hz: float = 440,
+    target_reference_hz: float = 432,
 ) -> list[str]:
     codec_args: dict[OutputFormat, list[str]] = {
         OutputFormat.MP3: ["-c:a", "libmp3lame", "-b:a", "320k", "-id3v2_version", "3"],
@@ -25,6 +29,13 @@ def build_ffmpeg_args(
     }
     if output_format not in codec_args:
         raise ConversionError("Format de sortie non autorisé.")
+    if not 400 <= source_reference_hz <= 480 or not 400 <= target_reference_hz <= 480:
+        raise ConversionError(
+            "Les fréquences de référence doivent être comprises entre 400 et 480 Hz."
+        )
+    if abs(source_reference_hz - target_reference_hz) < 0.001:
+        raise ConversionError("La fréquence source et la fréquence cible sont identiques.")
+    pitch_ratio = target_reference_hz / source_reference_hz
     return [
         "ffmpeg",
         "-hide_banner",
@@ -39,7 +50,7 @@ def build_ffmpeg_args(
         "-map_metadata",
         "0",
         "-af",
-        f"rubberband=pitch={PITCH_RATIO:.16f}:tempo=1.0",
+        f"rubberband=pitch={pitch_ratio:.16f}:tempo=1.0",
         *codec_args[output_format],
         "-progress",
         "pipe:1",
@@ -55,8 +66,16 @@ async def convert_audio(
     input_info: AudioInfo,
     settings: Settings,
     progress_callback: Callable[[int], None],
+    source_reference_hz: float = 440,
+    target_reference_hz: float = 432,
 ) -> AudioInfo:
-    args = build_ffmpeg_args(input_path, output_path, output_format)
+    args = build_ffmpeg_args(
+        input_path,
+        output_path,
+        output_format,
+        source_reference_hz,
+        target_reference_hz,
+    )
     process = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,

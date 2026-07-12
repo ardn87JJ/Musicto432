@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "musicto432-backend"
-version = "0.3.0"
+version = "0.4.0"
 description = "API de conversion audio 440 Hz vers 432 Hz"
 requires-python = ">=3.12"
 dependencies = [

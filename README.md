@@ -34,6 +34,9 @@ curl http://localhost:8080/api/health
 - analyse de l’accordage depuis un fichier ou un lien YouTube ;
 - estimation de la référence en hertz, comparaison 432/440 et indice de confiance ;
 - conversion successive de plusieurs fichiers avec résultats téléchargeables individuellement ;
+- téléchargement groupé des résultats dans une archive ZIP ;
+- choix de la fréquence source et cible entre 400 et 480 Hz ;
+- prévisualisation d’un lien YouTube avant traitement ;
 - arrêt immédiat et nettoyage d’une conversion ou d’une analyse ;
 - interface française responsive, accessible au clavier, claire et sombre ;
 - aucun compte, aucune base de données et aucun historique permanent.
@@ -83,6 +86,8 @@ Le test audio génère lui-même une sinusoïde libre de droits à 440 Hz, la co
 | `GET` | `/api/capabilities` | Formats, limites et modules disponibles |
 | `POST` | `/api/jobs/upload` | Création depuis un fichier multipart |
 | `POST` | `/api/jobs/youtube` | Création depuis une URL YouTube autorisée |
+| `POST` | `/api/youtube/inspect` | Vérification et métadonnées d’une vidéo YouTube |
+| `POST` | `/api/jobs/batch-download` | Archive ZIP de plusieurs résultats terminés |
 | `GET` | `/api/jobs/{job_id}` | Progression et état réel |
 | `GET` | `/api/jobs/{job_id}/download` | Lecture ou téléchargement du résultat |
 | `DELETE` | `/api/jobs/{job_id}` | Suppression immédiate |

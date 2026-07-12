@@ -10,6 +10,16 @@ export interface Job {
   error: string | null
   expires_at: string | null
   download_name: string | null
+  source_reference_hz: number
+  target_reference_hz: number
+}
+
+export interface YouTubeMetadata {
+  title: string
+  uploader: string | null
+  duration: number | null
+  thumbnail: string | null
+  webpage_url: string
 }
 
 export interface Capabilities {

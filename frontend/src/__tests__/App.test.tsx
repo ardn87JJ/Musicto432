@@ -23,7 +23,7 @@ describe('App', () => {
     render(<App />)
     expect(screen.getByRole('heading', { name: /Convertisseur musical 432 Hz/i })).toBeInTheDocument()
     expect(screen.getByText('Déposez un ou plusieurs morceaux ici')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Convertir en 432 Hz/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Convertir vers 432 Hz/ })).toBeDisabled()
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/capabilities'))
   })
 
@@ -52,10 +52,46 @@ describe('App', () => {
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Lien YouTube' }))
     await user.type(screen.getByLabelText('Adresse de la vidéo YouTube'), 'https://youtu.be/abcdefghijk')
-    const button = screen.getByRole('button', { name: /Convertir en 432 Hz/ })
+    const button = screen.getByRole('button', { name: /Convertir vers 432 Hz/ })
     expect(button).toBeDisabled()
     await user.click(screen.getByRole('checkbox'))
     await waitFor(() => expect(button).toBeEnabled())
+  })
+
+  it('permet de choisir une fréquence cible personnalisée', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    const target = screen.getByLabelText('Fréquence cible personnalisée')
+    await user.clear(target)
+    await user.type(target, '444')
+    expect(screen.getByRole('button', { name: /Convertir vers 444 Hz/ })).toBeDisabled()
+  })
+
+  it('prévisualise les informations YouTube avant traitement', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const target = String(input)
+      if (target.endsWith('/api/capabilities')) {
+        return { ok: true, json: async () => capabilities } as Response
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          title: 'Morceau de référence',
+          uploader: 'Artiste test',
+          duration: 185,
+          thumbnail: null,
+          webpage_url: 'https://youtu.be/abcdefghijk',
+        }),
+      } as Response
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Lien YouTube' }))
+    await user.type(screen.getByLabelText('Adresse de la vidéo YouTube'), 'https://youtu.be/abcdefghijk')
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Vérifier la vidéo' }))
+    expect(await screen.findByText('Morceau de référence')).toBeInTheDocument()
+    expect(screen.getByText(/Artiste test · 3:05/)).toBeInTheDocument()
   })
 
   it('désactive la conversion si Rubber Band manque', async () => {
@@ -86,6 +122,8 @@ describe('App', () => {
           error: null,
           expires_at: '2026-07-12T23:00:00Z',
           download_name: 'youtube-audio_432Hz.mp3',
+          source_reference_hz: 440,
+          target_reference_hz: 432,
         }),
       } as Response
     })
@@ -94,7 +132,7 @@ describe('App', () => {
     await user.click(screen.getByRole('tab', { name: 'Lien YouTube' }))
     await user.type(screen.getByLabelText('Adresse de la vidéo YouTube'), 'https://youtu.be/abcdefghijk')
     await user.click(screen.getByRole('checkbox'))
-    await user.click(await screen.findByRole('button', { name: /Convertir en 432 Hz/ }))
+    await user.click(await screen.findByRole('button', { name: /Convertir vers 432 Hz/ }))
     expect(await screen.findByRole('heading', { name: 'Votre morceau est prêt' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Télécharger le fichier/ })).toHaveAttribute(
       'href',

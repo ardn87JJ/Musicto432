@@ -77,6 +77,17 @@ def test_command_is_an_argument_list_without_shell_tokens(tmp_path: Path) -> Non
     assert f"rubberband=pitch={PITCH_RATIO:.16f}:tempo=1.0" in args
 
 
+def test_custom_reference_ratio_is_built_server_side(tmp_path: Path) -> None:
+    args = build_ffmpeg_args(
+        tmp_path / "source.wav",
+        tmp_path / "result.flac",
+        OutputFormat.FLAC,
+        source_reference_hz=432,
+        target_reference_hz=440,
+    )
+    assert f"rubberband=pitch={440 / 432:.16f}:tempo=1.0" in args
+
+
 @pytest.mark.audio
 @pytest.mark.skipif(not has_rubberband(), reason="FFmpeg Rubber Band indisponible")
 @pytest.mark.asyncio
