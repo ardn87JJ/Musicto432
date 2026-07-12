@@ -89,4 +89,46 @@ describe('App', () => {
       `/api/jobs/${'a'.repeat(32)}/download`,
     )
   })
+
+  it('analyse également un lien YouTube et affiche la référence estimée', async () => {
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const target = String(input)
+      if (target.endsWith('/api/capabilities')) {
+        return { ok: true, json: async () => capabilities } as Response
+      }
+      if (target.endsWith('/api/analysis/youtube') && init?.method === 'POST') {
+        return { ok: true, json: async () => ({ analysis_id: 'b'.repeat(32) }) } as Response
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          analysis_id: 'b'.repeat(32),
+          status: 'completed',
+          progress: 100,
+          stage: 'ready',
+          error: null,
+          expires_at: '2026-07-12T23:00:00Z',
+          result: {
+            estimated_reference_hz: 432.2,
+            offset_from_440_cents: -30.97,
+            offset_from_432_cents: 0.8,
+            classification: '432',
+            confidence: 84,
+            analyzed_seconds: 60,
+            explanation: 'Le morceau semble accordé autour de La = 432 Hz.',
+          },
+        }),
+      } as Response
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: /Vérifier l’accordage/ }))
+    await user.click(screen.getByRole('tab', { name: 'Lien YouTube' }))
+    await user.type(screen.getByLabelText('Adresse de la vidéo YouTube'), 'https://youtu.be/abcdefghijk')
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(await screen.findByRole('button', { name: 'Analyser l’accordage' }))
+    expect(await screen.findByText('432.2')).toBeInTheDocument()
+    expect(screen.getByText(/semble accordé autour de La = 432 Hz/)).toBeInTheDocument()
+    expect(screen.getByText('84%')).toBeInTheDocument()
+  })
 })

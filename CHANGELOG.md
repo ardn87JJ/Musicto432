@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.2.0 — 2026-07-12
+
+- Ajoute l’onglet « Vérifier l’accordage » pour les fichiers locaux et les liens YouTube.
+- Estime la référence musicale, les écarts avec 432/440 Hz et un indice de confiance.
+- Analyse plusieurs passages du morceau sans conserver le contenu après traitement.
+- Ajoute des tests de référence automatiques à 432 Hz et 440 Hz.
+
 ## 0.1.2 — 2026-07-12
 
 - Le suivi normal de la progression n’est plus compté dans la limite par minute.

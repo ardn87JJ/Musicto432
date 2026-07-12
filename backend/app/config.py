@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "MusicTo432"
-    app_version: str = "0.1.2"
+    app_version: str = "0.2.0"
     debug: bool = False
     temp_root: Path = Path("/tmp/musicto432")
     max_upload_mb: int = Field(default=250, ge=1, le=2048)
@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     youtube_enabled: bool = True
     youtube_timeout_seconds: int = Field(default=180, ge=10, le=1800)
     ffmpeg_timeout_seconds: int = Field(default=7200, ge=30, le=86400)
+    analysis_segment_seconds: int = Field(default=20, ge=5, le=60)
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
         "http://localhost:8080",

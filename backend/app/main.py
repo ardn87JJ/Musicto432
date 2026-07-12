@@ -12,6 +12,9 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from app.config import get_settings
 from app.models import (
+    AnalysisCreated,
+    AnalysisPublic,
+    AnalysisYouTubeRequest,
     CapabilitiesResponse,
     HealthResponse,
     JobCreated,
@@ -21,6 +24,7 @@ from app.models import (
     YouTubeRequest,
 )
 from app.rate_limit import RateLimitMiddleware
+from app.services.analysis_jobs import AnalysisManager, AnalysisNotFoundError
 from app.services.jobs import JobManager, JobNotFoundError
 from app.services.media import MediaValidationError, sanitize_filename, validate_extension
 from app.services.system import command_available, rubberband_available, temp_directory_accessible
@@ -32,6 +36,7 @@ async def cleanup_loop(app: FastAPI) -> None:
     while True:
         await asyncio.sleep(60)
         await app.state.jobs.cleanup_expired()
+        await app.state.analyses.cleanup_expired()
 
 
 @asynccontextmanager
@@ -40,12 +45,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     rubberband = await rubberband_available()
     app.state.rubberband = rubberband
     app.state.jobs = JobManager(settings, rubberband)
+    app.state.analyses = AnalysisManager(settings)
     app.state.cleanup_task = asyncio.create_task(cleanup_loop(app))
     yield
     app.state.cleanup_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await app.state.cleanup_task
     await app.state.jobs.shutdown()
+    await app.state.analyses.shutdown()
 
 
 app = FastAPI(
@@ -83,6 +90,11 @@ async def job_not_found(_: Request, __: JobNotFoundError) -> JSONResponse:
     return JSONResponse(status_code=404, content={"detail": "Traitement introuvable ou expiré."})
 
 
+@app.exception_handler(AnalysisNotFoundError)
+async def analysis_not_found(_: Request, __: AnalysisNotFoundError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": "Analyse introuvable ou expirée."})
+
+
 @app.get("/api/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     checks = {
@@ -108,6 +120,7 @@ async def capabilities() -> CapabilitiesResponse:
         max_duration_seconds=settings.max_audio_duration_seconds,
         youtube_available=settings.youtube_enabled and shutil.which("yt-dlp") is not None,
         rubberband_available=rubberband,
+        tuning_analysis_available=True,
     )
 
 
@@ -191,3 +204,47 @@ async def download_job(job_id: str) -> FileResponse:
 @app.delete("/api/jobs/{job_id}", status_code=204)
 async def delete_job(job_id: str) -> None:
     await app.state.jobs.delete(job_id)
+
+
+@app.post("/api/analysis/upload", response_model=AnalysisCreated, status_code=202)
+async def analysis_upload(
+    file: Annotated[UploadFile, File()],
+) -> AnalysisCreated:
+    filename = sanitize_filename(file.filename or "audio")
+    try:
+        suffix = validate_extension(filename)
+    except MediaValidationError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    record = await app.state.analyses.create()
+    source_path = record.directory / f"source{suffix}"
+    try:
+        await save_upload(file, source_path)
+    except Exception:
+        await app.state.analyses.delete(record.analysis_id)
+        raise
+    app.state.analyses.start_file(record, source_path)
+    return AnalysisCreated(analysis_id=record.analysis_id, status=JobStatus.QUEUED)
+
+
+@app.post("/api/analysis/youtube", response_model=AnalysisCreated, status_code=202)
+async def analysis_youtube(payload: AnalysisYouTubeRequest) -> AnalysisCreated:
+    if not settings.youtube_enabled or shutil.which("yt-dlp") is None:
+        raise HTTPException(status_code=503, detail="L’import YouTube est indisponible.")
+    if not payload.rights_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Vous devez confirmer disposer des droits nécessaires.",
+        )
+    record = await app.state.analyses.create()
+    app.state.analyses.start_youtube(record, payload.url)
+    return AnalysisCreated(analysis_id=record.analysis_id, status=JobStatus.QUEUED)
+
+
+@app.get("/api/analysis/{analysis_id}", response_model=AnalysisPublic)
+async def get_analysis(analysis_id: str) -> AnalysisPublic:
+    return (await app.state.analyses.get(analysis_id)).public()
+
+
+@app.delete("/api/analysis/{analysis_id}", status_code=204)
+async def delete_analysis(analysis_id: str) -> None:
+    await app.state.analyses.delete(analysis_id)

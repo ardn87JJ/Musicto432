@@ -14,10 +14,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.requests: dict[str, deque[float]] = defaultdict(deque)
 
     async def dispatch(self, request: Request, call_next: object) -> Response:
-        is_job_status_poll = request.method == "GET" and re.fullmatch(
-            r"/api/jobs/[0-9a-f]{32}", request.url.path
+        is_status_poll = request.method == "GET" and re.fullmatch(
+            r"/api/(?:jobs|analysis)/[0-9a-f]{32}", request.url.path
         )
-        if request.url.path in {"/api/health", "/api/capabilities"} or is_job_status_poll:
+        if request.url.path in {"/api/health", "/api/capabilities"} or is_status_poll:
             return await call_next(request)
         client = request.client.host if request.client else "unknown"
         now = time.monotonic()

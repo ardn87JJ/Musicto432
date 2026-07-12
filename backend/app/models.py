@@ -48,6 +48,36 @@ class YouTubeRequest(BaseModel):
     output_format: OutputFormat = OutputFormat.MP3
 
 
+class AnalysisYouTubeRequest(BaseModel):
+    url: str = Field(min_length=10, max_length=2048)
+    rights_confirmed: bool
+
+
+class TuningResult(BaseModel):
+    estimated_reference_hz: float
+    offset_from_440_cents: float
+    offset_from_432_cents: float
+    classification: str
+    confidence: int = Field(ge=0, le=100)
+    analyzed_seconds: float
+    explanation: str
+
+
+class AnalysisPublic(BaseModel):
+    analysis_id: str
+    status: JobStatus
+    progress: int = Field(ge=0, le=100)
+    stage: str
+    error: str | None = None
+    result: TuningResult | None = None
+    expires_at: datetime | None = None
+
+
+class AnalysisCreated(BaseModel):
+    analysis_id: str
+    status: JobStatus
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str
@@ -61,8 +91,8 @@ class CapabilitiesResponse(BaseModel):
     max_duration_seconds: int
     youtube_available: bool
     rubberband_available: bool
+    tuning_analysis_available: bool
 
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
-

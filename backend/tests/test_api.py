@@ -18,14 +18,14 @@ def has_rubberband() -> bool:
     return shutil.which("ffmpeg") is not None and "rubberband" in result.stdout
 
 
-def make_short_tone(path: Path) -> None:
+def make_short_tone(path: Path, duration: float = 0.5) -> None:
     sample_rate = 16000
     with wave.open(str(path), "wb") as output:
         output.setnchannels(1)
         output.setsampwidth(2)
         output.setframerate(sample_rate)
         frames = bytearray()
-        for index in range(sample_rate // 2):
+        for index in range(round(sample_rate * duration)):
             sample = round(8000 * math.sin(2 * math.pi * 440 * index / sample_rate))
             frames.extend(sample.to_bytes(2, "little", signed=True))
         output.writeframes(frames)
@@ -85,3 +85,33 @@ def test_progress_polling_is_not_rate_limited() -> None:
     with TestClient(app) as client:
         responses = [client.get(f"/api/jobs/{unknown_job}") for _ in range(45)]
     assert all(response.status_code == 404 for response in responses)
+
+
+def test_analysis_polling_is_not_rate_limited() -> None:
+    unknown_analysis = "b" * 32
+    with TestClient(app) as client:
+        responses = [client.get(f"/api/analysis/{unknown_analysis}") for _ in range(45)]
+    assert all(response.status_code == 404 for response in responses)
+
+
+def test_complete_file_tuning_analysis_cycle(tmp_path: Path) -> None:
+    source = tmp_path / "analysis-tone.wav"
+    make_short_tone(source, duration=3)
+    with TestClient(app) as client, source.open("rb") as audio:
+        created = client.post(
+            "/api/analysis/upload",
+            files={"file": ("analysis-tone.wav", audio, "audio/wav")},
+        )
+        assert created.status_code == 202
+        analysis_id = created.json()["analysis_id"]
+        state = None
+        for _ in range(100):
+            state = client.get(f"/api/analysis/{analysis_id}").json()
+            if state["status"] in {"completed", "failed"}:
+                break
+            time.sleep(0.02)
+        assert state is not None
+        assert state["status"] == "completed", state
+        assert state["result"]["classification"] == "440"
+        assert state["result"]["estimated_reference_hz"] == pytest.approx(440, abs=1)
+        assert client.delete(f"/api/analysis/{analysis_id}").status_code == 204

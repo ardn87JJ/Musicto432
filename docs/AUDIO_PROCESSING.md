@@ -42,3 +42,10 @@ Choisir WAV ou FLAC évite une nouvelle compression destructive du résultat, ma
 
 Le logiciel suppose que la source correspond à une référence 440 Hz. Il ne détecte ni la tonalité, ni l’accordage réel, ni les variations d’accordage entre instruments. Il applique uniformément le rapport à tout le mix. Les algorithmes de changement de hauteur peuvent créer de faibles artefacts, surtout sur des transitoires complexes ou après plusieurs réencodages.
 
+## Estimation de l’accordage
+
+L’onglet d’analyse extrait en mono plusieurs passages répartis dans le morceau, sans modifier le fichier original. Une transformée de Fourier repère les pics spectraux correspondant aux notes stables. Leur écart avec la grille tempérée basée sur La = 440 Hz est regroupé dans un histogramme circulaire de cents.
+
+Le maximum de cet histogramme donne le décalage global probable. La référence est ensuite calculée par `440 × 2^(écart/1200)`. L’indice de confiance mesure la concentration des observations autour de ce maximum ; ce n’est pas une preuve absolue.
+
+Les morceaux très percussifs, bruités, atonaux, utilisant plusieurs accordages, des glissandos permanents ou un tempérament non égal peuvent être classés « incertains ». L’analyse ne prétend pas identifier une intention artistique ni prouver qu’un morceau a été produit spécifiquement pour 432 Hz.

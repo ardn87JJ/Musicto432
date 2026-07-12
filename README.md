@@ -31,6 +31,8 @@ curl http://localhost:8080/api/health
 - écoute de l’original et du résultat ;
 - téléchargement temporaire et suppression automatique ;
 - import YouTube optionnel, isolé et désactivable ;
+- analyse de l’accordage depuis un fichier ou un lien YouTube ;
+- estimation de la référence en hertz, comparaison 432/440 et indice de confiance ;
 - interface française responsive, accessible au clavier, claire et sombre ;
 - aucun compte, aucune base de données et aucun historique permanent.
 
@@ -82,6 +84,10 @@ Le test audio génère lui-même une sinusoïde libre de droits à 440 Hz, la co
 | `GET` | `/api/jobs/{job_id}` | Progression et état réel |
 | `GET` | `/api/jobs/{job_id}/download` | Lecture ou téléchargement du résultat |
 | `DELETE` | `/api/jobs/{job_id}` | Suppression immédiate |
+| `POST` | `/api/analysis/upload` | Analyse d’un fichier audio |
+| `POST` | `/api/analysis/youtube` | Analyse d’une piste YouTube autorisée |
+| `GET` | `/api/analysis/{analysis_id}` | Progression et résultat de l’analyse |
+| `DELETE` | `/api/analysis/{analysis_id}` | Suppression immédiate de l’analyse |
 
 ## Déploiement
 
@@ -91,9 +97,8 @@ Voir [Architecture](docs/ARCHITECTURE.md), [Déploiement](docs/DEPLOYMENT.md), [
 
 ## Limite essentielle
 
-L’application applique un décalage relatif 440 → 432. Elle ne mesure pas l’accordage réel du morceau source et ne prétend donc pas garantir qu’il était effectivement accordé à 440 Hz.
+La conversion applique toujours un décalage relatif 440 → 432. L’onglet d’analyse fournit séparément une estimation statistique de l’accordage source : elle aide à choisir, mais ne constitue pas une mesure absolue ni une preuve de l’intention musicale d’origine.
 
 ## Licence
 
 Le code du projet est publié sous licence MIT. FFmpeg, Rubber Band et yt-dlp restent soumis à leurs propres licences. Toute image Docker redistribuée doit conserver les avis et obligations des composants qu’elle contient.
-

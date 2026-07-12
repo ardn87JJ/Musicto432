@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { deleteJob, downloadUrl, getCapabilities, getJob, submitYoutube, uploadFile } from './api'
+import {
+  deleteAnalysis,
+  deleteJob,
+  downloadUrl,
+  getAnalysis,
+  getCapabilities,
+  getJob,
+  submitYoutube,
+  submitYoutubeAnalysis,
+  uploadAnalysis,
+  uploadFile,
+} from './api'
 import { strings } from './strings'
-import type { Capabilities, Job, OutputFormat } from './types'
+import type { Analysis, Capabilities, Job, OutputFormat } from './types'
 import './styles.css'
 
 const ALLOWED_EXTENSIONS = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg']
@@ -12,6 +23,7 @@ function formatBytes(bytes: number): string {
 }
 
 function App() {
+  const [feature, setFeature] = useState<'convert' | 'analyze'>('convert')
   const [mode, setMode] = useState<'file' | 'youtube'>('file')
   const [file, setFile] = useState<File | null>(null)
   const [url, setUrl] = useState('')
@@ -19,6 +31,8 @@ function App() {
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('mp3')
   const [job, setJob] = useState<Job | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
+  const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [analysisId, setAnalysisId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null)
@@ -48,7 +62,25 @@ function App() {
     return () => { cancelled = true }
   }, [jobId])
 
+  useEffect(() => {
+    if (!analysisId) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const next = await getAnalysis(analysisId)
+        if (cancelled) return
+        setAnalysis(next)
+        if (next.status === 'queued' || next.status === 'processing') window.setTimeout(poll, 800)
+      } catch (caught) {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : 'Le suivi de l’analyse a échoué.')
+      }
+    }
+    void poll()
+    return () => { cancelled = true }
+  }, [analysisId])
+
   const working = Boolean(jobId && (!job || job.status === 'queued' || job.status === 'processing'))
+  const analyzing = Boolean(analysisId && (!analysis || analysis.status === 'queued' || analysis.status === 'processing'))
   const canSubmit = mode === 'file' ? Boolean(file) : Boolean(url.trim() && rights && capabilities?.youtube_available)
 
   const chooseFile = (selected?: File) => {
@@ -100,8 +132,44 @@ function App() {
     if (previousId) await deleteJob(previousId).catch(() => undefined)
   }
 
-  const visibleProgress = uploadProgress ?? job?.progress ?? 0
-  const visibleStage = uploadProgress !== null ? strings.stages.upload : job ? strings.stages[job.stage] : ''
+  const analyze = async () => {
+    if (!canSubmit || analyzing) return
+    setError(null)
+    setAnalysis(null)
+    try {
+      let created: { analysis_id: string }
+      if (mode === 'file' && file) {
+        setUploadProgress(0)
+        created = await uploadAnalysis(file, setUploadProgress)
+        setUploadProgress(null)
+      } else {
+        created = await submitYoutubeAnalysis(url.trim())
+      }
+      setAnalysisId(created.analysis_id)
+    } catch (caught) {
+      setUploadProgress(null)
+      setError(caught instanceof Error ? caught.message : 'L’analyse n’a pas pu démarrer.')
+    }
+  }
+
+  const resetAnalysis = async () => {
+    const previousId = analysisId
+    setAnalysisId(null)
+    setAnalysis(null)
+    setError(null)
+    setUploadProgress(null)
+    if (previousId) await deleteAnalysis(previousId).catch(() => undefined)
+  }
+
+  const visibleProgress = uploadProgress ?? (feature === 'analyze' ? analysis?.progress : job?.progress) ?? 0
+  const analysisStages = { download: 'Récupération de la piste audio', preparation: 'Préparation du signal', analysis: 'Analyse de l’accordage', ready: 'Analyse terminée' }
+  const visibleStage = uploadProgress !== null
+    ? strings.stages.upload
+    : feature === 'analyze' && analysis
+      ? analysisStages[analysis.stage]
+      : job
+        ? strings.stages[job.stage]
+        : ''
   const serviceUnavailable = capabilities && !capabilities.rubberband_available
 
   return (
@@ -111,16 +179,22 @@ function App() {
       <section className="app-card" aria-labelledby="page-title">
         <header className="hero">
           <div className="mark" aria-hidden="true"><span>432</span><small>Hz</small></div>
-          <p className="eyebrow">PITCH CONVERTER</p>
-          <h1 id="page-title">Convertisseur musical <em>432 Hz</em></h1>
-          <p className="intro">Décalez la hauteur de votre morceau de 440 vers 432 Hz, tout en conservant son tempo et sa durée.</p>
+          <p className="eyebrow">MUSICAL TUNING TOOL</p>
+          <h1 id="page-title">{feature === 'convert' ? <>Convertisseur musical <em>432 Hz</em></> : <>Vérifier <em>l’accordage</em></>}</h1>
+          <p className="intro">{feature === 'convert' ? 'Décalez la hauteur de votre morceau de 440 vers 432 Hz, tout en conservant son tempo et sa durée.' : 'Estimez la référence d’accordage de votre morceau et découvrez s’il se rapproche de 432 Hz, de 440 Hz ou d’une autre valeur.'}</p>
         </header>
+
+        <nav className="feature-tabs" aria-label="Fonction principale">
+          <button className={feature === 'convert' ? 'active' : ''} onClick={() => setFeature('convert')}><span aria-hidden="true">↯</span> Convertir</button>
+          <button className={feature === 'analyze' ? 'active' : ''} onClick={() => setFeature('analyze')}><span aria-hidden="true">◉</span> Vérifier l’accordage</button>
+        </nav>
 
         {serviceUnavailable && <div className="alert error" role="alert">Le serveur ne possède pas le filtre Rubber Band requis. La conversion est désactivée.</div>}
         {error && <div className="alert error" role="alert">{error}</div>}
         {job?.status === 'failed' && <div className="alert error" role="alert">{job.error ?? 'La conversion a échoué.'}</div>}
+        {analysis?.status === 'failed' && <div className="alert error" role="alert">{analysis.error ?? 'L’analyse a échoué.'}</div>}
 
-        {!jobId && (
+        {feature === 'convert' && !jobId && (
           <>
             <div className="tabs" role="tablist" aria-label="Source du morceau">
               <button role="tab" aria-selected={mode === 'file'} className={mode === 'file' ? 'active' : ''} onClick={() => setMode('file')}>Fichier audio</button>
@@ -168,7 +242,7 @@ function App() {
           </>
         )}
 
-        {jobId && job?.status !== 'completed' && (
+        {feature === 'convert' && jobId && job?.status !== 'completed' && (
           <section className="progress-panel" aria-live="polite">
             <div className="vinyl" aria-hidden="true"><div /></div>
             <p className="stage">{visibleStage || 'Mise en file d’attente'}</p>
@@ -179,7 +253,7 @@ function App() {
           </section>
         )}
 
-        {job?.status === 'completed' && (
+        {feature === 'convert' && job?.status === 'completed' && (
           <section className="result-panel" aria-live="polite">
             <div className="success-icon" aria-hidden="true">✓</div>
             <p className="eyebrow">CONVERSION TERMINÉE</p>
@@ -192,7 +266,75 @@ function App() {
           </section>
         )}
 
-        <footer><span>440 → 432</span><p>Le réglage applique un décalage relatif. Il ne détecte pas l’accordage d’origine.</p></footer>
+        {feature === 'analyze' && !analysisId && (
+          <section className="analysis-start">
+            <div className="tabs" role="tablist" aria-label="Source à analyser">
+              <button role="tab" aria-selected={mode === 'file'} className={mode === 'file' ? 'active' : ''} onClick={() => setMode('file')}>Fichier audio</button>
+              <button role="tab" aria-selected={mode === 'youtube'} className={mode === 'youtube' ? 'active' : ''} onClick={() => setMode('youtube')}>Lien YouTube</button>
+            </div>
+
+            {mode === 'file' ? (
+              <div key="analysis-file-mode">
+                <button
+                  type="button"
+                  className={`drop-zone ${file ? 'has-file' : ''}`}
+                  onClick={() => inputRef.current?.click()}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]) }}
+                >
+                  <span className="upload-icon" aria-hidden="true">⌁</span>
+                  {file ? <><strong>{file.name}</strong><span>{formatBytes(file.size)} · Cliquer pour remplacer</span></> : <><strong>Choisissez un morceau à analyser</strong><span>ou déposez-le dans cette zone</span></>}
+                </button>
+                <input ref={inputRef} className="sr-only" type="file" accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,audio/*" onChange={(event) => chooseFile(event.target.files?.[0])} />
+                <p className="formats-note">L’analyse utilise plusieurs passages contenant des notes stables.</p>
+                {localPreview && <div className="preview"><span>Morceau à analyser</span><audio controls src={localPreview}>Votre navigateur ne peut pas lire ce fichier.</audio></div>}
+              </div>
+            ) : (
+              <div key="analysis-youtube-mode" className="youtube-panel">
+                <label htmlFor="analysis-youtube-url">Adresse de la vidéo YouTube</label>
+                <input id="analysis-youtube-url" type="url" inputMode="url" placeholder="https://youtu.be/…" value={url} onChange={(event) => setUrl(event.target.value)} />
+                {capabilities && !capabilities.youtube_available && <p className="inline-warning">L’import YouTube est indisponible sur ce serveur.</p>}
+                <label className="rights-check"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} /><span>Je confirme disposer des droits ou de l’autorisation nécessaires pour télécharger et analyser ce contenu.</span></label>
+              </div>
+            )}
+
+            <div className="analysis-note"><span aria-hidden="true">i</span><p>L’application estime une référence musicale globale. Un morceau très percussif, bruité ou volontairement désaccordé peut produire un résultat incertain.</p></div>
+            <button className="primary-button" disabled={!canSubmit} onClick={() => void analyze()}><span>Analyser l’accordage</span><span aria-hidden="true">→</span></button>
+          </section>
+        )}
+
+        {feature === 'analyze' && analysisId && analysis?.status !== 'completed' && (
+          <section className="progress-panel" aria-live="polite">
+            <div className="spectrum-loader" aria-hidden="true">{[1,2,3,4,5,6,7,8,9].map((item) => <i key={item} />)}</div>
+            <p className="stage">{visibleStage || 'Mise en file d’attente'}</p>
+            <p className="progress-value">{visibleProgress}<small>%</small></p>
+            <progress max="100" value={visibleProgress}>{visibleProgress}%</progress>
+            <p className="patience">Recherche d’une référence commune dans plusieurs passages.</p>
+            {analysis?.status === 'failed' && <button className="secondary-button" onClick={() => void resetAnalysis()}>Analyser un autre morceau</button>}
+          </section>
+        )}
+
+        {feature === 'analyze' && analysis?.status === 'completed' && analysis.result && (
+          <section className="analysis-result" aria-live="polite">
+            <p className="eyebrow">RÉFÉRENCE ESTIMÉE</p>
+            <div className="frequency-reading"><strong>{analysis.result.estimated_reference_hz.toFixed(1)}</strong><span>Hz</span></div>
+            <p className={`classification class-${analysis.result.classification}`}>{analysis.result.explanation}</p>
+            <div className="tuning-scale" aria-label={`Référence estimée ${analysis.result.estimated_reference_hz.toFixed(1)} hertz`}>
+              <div className="scale-track"><i className="marker marker-432" /><i className="marker marker-440" /><i className="estimate" style={{ left: `${Math.min(100, Math.max(0, (analysis.result.estimated_reference_hz - 428) / 25 * 100))}%` }} /></div>
+              <div className="scale-labels"><span>428</span><b>432 Hz</b><b>440 Hz</b><span>453</span></div>
+            </div>
+            <div className="analysis-metrics">
+              <div><span>Écart avec 440 Hz</span><strong>{analysis.result.offset_from_440_cents > 0 ? '+' : ''}{analysis.result.offset_from_440_cents.toFixed(1)} cents</strong></div>
+              <div><span>Écart avec 432 Hz</span><strong>{analysis.result.offset_from_432_cents > 0 ? '+' : ''}{analysis.result.offset_from_432_cents.toFixed(1)} cents</strong></div>
+              <div><span>Confiance</span><strong>{analysis.result.confidence}%</strong></div>
+            </div>
+            <div className="confidence-bar"><i style={{ width: `${analysis.result.confidence}%` }} /></div>
+            {analysis.result.classification === '440' && <button className="primary-button" onClick={() => setFeature('convert')}><span>Convertir ce morceau en 432 Hz</span><span aria-hidden="true">→</span></button>}
+            <button className="text-button" onClick={() => void resetAnalysis()}>Analyser un autre morceau</button>
+          </section>
+        )}
+
+        <footer><span>{feature === 'convert' ? '440 → 432' : '432 · 440'}</span><p>{feature === 'convert' ? 'La conversion applique un décalage relatif sans modifier le tempo.' : 'L’estimation dépend des notes stables réellement présentes dans le morceau.'}</p></footer>
       </section>
     </main>
   )
