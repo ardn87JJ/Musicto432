@@ -1,4 +1,4 @@
-const CACHE_NAME = 'musicto432-frontend-v0.5.0'
+const CACHE_NAME = 'musicto432-frontend-v0.6.0'
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',

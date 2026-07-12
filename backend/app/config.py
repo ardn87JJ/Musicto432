@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "MusicTo432"
-    app_version: str = "0.5.0"
+    app_version: str = "0.6.0"
     debug: bool = False
     temp_root: Path = Path("/tmp/musicto432")
     max_upload_mb: int = Field(default=250, ge=1, le=2048)

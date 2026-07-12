@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.6.0 — 2026-07-13
+
+- Adopte une identité visuelle bleu nuit, cyan, violet et magenta assortie aux visuels MusicTo432.
+- Intègre l’illustration 440 → 432 dans l’en-tête responsive.
+- Remplace les icônes PWA, iPhone et favicon par l’icône officielle fournie.
+- Renforce les contrastes, les états de focus et les effets lumineux sans réduire l’accessibilité.
+
 ## 0.5.0 — 2026-07-13
 
 - Transforme le frontend en Progressive Web App installable.

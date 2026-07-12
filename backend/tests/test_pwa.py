@@ -19,10 +19,11 @@ def test_manifest_and_install_icons() -> None:
     assert png_size(PUBLIC / "icons" / "icon-192.png") == (192, 192)
     assert png_size(PUBLIC / "icons" / "icon-512.png") == (512, 512)
     assert png_size(PUBLIC / "icons" / "apple-touch-icon.png") == (180, 180)
+    assert (PUBLIC / "brand" / "musicto432-hero.webp").stat().st_size > 10_000
 
 
 def test_service_worker_never_caches_api_or_audio_results() -> None:
     service_worker = (PUBLIC / "sw.js").read_text()
     assert "url.pathname.startsWith('/api/')" in service_worker
     assert "request.method !== 'GET'" in service_worker
-    assert "musicto432-frontend-v0.5.0" in service_worker
+    assert "musicto432-frontend-v0.6.0" in service_worker
