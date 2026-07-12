@@ -27,11 +27,10 @@ describe('App', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/capabilities'))
   })
 
-  it('propose l’installation et indique le mode hors ligne', async () => {
-    const user = userEvent.setup()
+  it('ne propose plus l’installation et indique le mode hors ligne', async () => {
     render(<App />)
-    await user.click(screen.getByRole('button', { name: 'Installer' }))
-    expect(screen.getByRole('status')).toHaveTextContent('menu de votre navigateur')
+    expect(screen.queryByRole('button', { name: 'Installer' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Installer MusicTo432')).not.toBeInTheDocument()
     window.dispatchEvent(new Event('offline'))
     expect(await screen.findByText(/Interface disponible hors ligne/)).toBeInTheDocument()
   })

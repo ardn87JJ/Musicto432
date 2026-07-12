@@ -37,7 +37,6 @@ curl http://localhost:8080/api/health
 - téléchargement groupé des résultats dans une archive ZIP ;
 - choix de la fréquence source et cible entre 400 et 480 Hz ;
 - prévisualisation d’un lien YouTube avant traitement ;
-- installation PWA avec icône et lancement plein écran ;
 - frontend réutilisable hors ligne, sans mise en cache des fichiers audio ou de l’API ;
 - arrêt immédiat et nettoyage d’une conversion ou d’une analyse ;
 - interface française responsive, accessible au clavier, claire et sombre ;
@@ -102,7 +101,7 @@ Le test audio génère lui-même une sinusoïde libre de droits à 440 Hz, la co
 
 GitHub peut héberger le dépôt et exécuter la CI. GitHub Pages peut éventuellement servir le build statique du frontend, mais **ne peut pas exécuter FastAPI, FFmpeg ou yt-dlp**. Le backend doit être déployé sur un service capable d’exécuter un conteneur et de fournir du stockage temporaire.
 
-Voir [Architecture](docs/ARCHITECTURE.md), [Déploiement](docs/DEPLOYMENT.md), [Sécurité](docs/SECURITY.md), [Traitement audio](docs/AUDIO_PROCESSING.md), [Calibration](docs/CALIBRATION.md), [Installation PWA](docs/PWA.md), [Droit et usage](docs/LEGAL_AND_USAGE.md) et [Mises à jour](docs/UPDATE_WORKFLOW.md).
+Voir [Architecture](docs/ARCHITECTURE.md), [Déploiement](docs/DEPLOYMENT.md), [Sécurité](docs/SECURITY.md), [Traitement audio](docs/AUDIO_PROCESSING.md), [Calibration](docs/CALIBRATION.md), [Droit et usage](docs/LEGAL_AND_USAGE.md) et [Mises à jour](docs/UPDATE_WORKFLOW.md).
 
 ## Limite essentielle
 

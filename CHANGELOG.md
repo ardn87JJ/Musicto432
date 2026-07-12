@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.6.1 — 2026-07-13
+
+- Maintient le titre « Convertisseur musical 432 Hz » sur une ligne sur ordinateur.
+- Conserve « 432 Hz » insécable lorsque le titre doit se replier sur mobile.
+- Supprime l’installation PWA, son bouton, son manifeste et son service worker.
+- Nettoie automatiquement les anciens service workers et caches MusicTo432.
+
 ## 0.6.0 — 2026-07-13
 
 - Adopte une identité visuelle bleu nuit, cyan, violet et magenta assortie aux visuels MusicTo432.
