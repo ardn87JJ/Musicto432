@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.5.0 — 2026-07-13
+
+- Transforme le frontend en Progressive Web App installable.
+- Ajoute une icône dédiée aux formats 180, 192 et 512 pixels.
+- Ajoute le lancement plein écran `standalone` sur iPhone et ordinateur.
+- Ajoute un bouton d’installation et des instructions adaptées à Safari iPhone.
+- Met en cache uniquement le frontend ; les contenus audio et routes API restent exclus.
+- Affiche un état hors ligne explicite lorsque le backend est inaccessible.
+
 ## 0.4.0 — 2026-07-13
 
 - Ajoute le choix de la fréquence source et cible entre 400 et 480 Hz.

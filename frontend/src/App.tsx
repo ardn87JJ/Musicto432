@@ -28,6 +28,11 @@ interface BatchItem {
   error?: string | null
 }
 
+interface InstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`
   return `${(bytes / 1024 / 1024).toFixed(1)} Mo`
@@ -40,7 +45,9 @@ function formatDuration(seconds: number | null): string {
 }
 
 function App() {
-  const [feature, setFeature] = useState<'convert' | 'analyze'>('convert')
+  const [feature, setFeature] = useState<'convert' | 'analyze'>(() => (
+    new URLSearchParams(window.location.search).get('mode') === 'analyze' ? 'analyze' : 'convert'
+  ))
   const [mode, setMode] = useState<'file' | 'youtube'>('file')
   const [files, setFiles] = useState<File[]>([])
   const [url, setUrl] = useState('')
@@ -60,6 +67,12 @@ function App() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [youtubeMetadata, setYoutubeMetadata] = useState<YouTubeMetadata | null>(null)
   const [youtubeInspecting, setYoutubeInspecting] = useState(false)
+  const [online, setOnline] = useState(navigator.onLine)
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
+  const [standalone, setStandalone] = useState(() => (
+    window.matchMedia('(display-mode: standalone)').matches
+    || Boolean((navigator as Navigator & { standalone?: boolean }).standalone)
+  ))
   const inputRef = useRef<HTMLInputElement>(null)
   const batchRunningRef = useRef(false)
   const batchCancelledRef = useRef(false)
@@ -71,6 +84,30 @@ function App() {
 
   useEffect(() => {
     getCapabilities().then(setCapabilities).catch(() => setError('Le serveur de conversion est inaccessible.'))
+  }, [])
+
+  useEffect(() => {
+    const handleOnline = () => setOnline(true)
+    const handleOffline = () => setOnline(false)
+    const handleInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as InstallPromptEvent)
+    }
+    const handleInstalled = () => {
+      setStandalone(true)
+      setInstallPrompt(null)
+      setNotice('MusicTo432 est maintenant installée.')
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    window.addEventListener('beforeinstallprompt', handleInstallPrompt)
+    window.addEventListener('appinstalled', handleInstalled)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('beforeinstallprompt', handleInstallPrompt)
+      window.removeEventListener('appinstalled', handleInstalled)
+    }
   }, [])
 
   useEffect(() => {
@@ -308,6 +345,19 @@ function App() {
     }
   }
 
+  const installApplication = async () => {
+    if (installPrompt) {
+      await installPrompt.prompt()
+      const choice = await installPrompt.userChoice
+      if (choice.outcome === 'accepted') setInstallPrompt(null)
+      return
+    }
+    const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    setNotice(isAppleMobile
+      ? 'Sur iPhone : ouvrez le bouton Partager de Safari, puis « Sur l’écran d’accueil ». '
+      : 'Ouvrez le menu de votre navigateur puis choisissez « Installer MusicTo432 ».')
+  }
+
   const analyze = async () => {
     if (!canSubmit || analyzing) return
     setError(null)
@@ -375,7 +425,10 @@ function App() {
           <button className={feature === 'analyze' ? 'active' : ''} onClick={() => setFeature('analyze')}><span aria-hidden="true">◉</span> Vérifier l’accordage</button>
         </nav>
 
+        {!standalone && <div className="install-bar"><div><strong>Installer MusicTo432</strong><span>Icône, plein écran et accès rapide depuis votre appareil.</span></div><button onClick={() => void installApplication()}>Installer</button></div>}
+
         {serviceUnavailable && <div className="alert error" role="alert">Le serveur ne possède pas le filtre Rubber Band requis. La conversion est désactivée.</div>}
+        {!online && <div className="alert offline" role="status">Interface disponible hors ligne. Reconnectez le serveur pour analyser ou convertir un morceau.</div>}
         {notice && <div className="alert info" role="status">{notice}</div>}
         {error && <div className="alert error" role="alert">{error}</div>}
         {job?.status === 'failed' && <div className="alert error" role="alert">{job.error ?? 'La conversion a échoué.'}</div>}

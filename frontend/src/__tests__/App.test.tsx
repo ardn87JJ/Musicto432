@@ -27,6 +27,15 @@ describe('App', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/capabilities'))
   })
 
+  it('propose l’installation et indique le mode hors ligne', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Installer' }))
+    expect(screen.getByRole('status')).toHaveTextContent('menu de votre navigateur')
+    window.dispatchEvent(new Event('offline'))
+    expect(await screen.findByText(/Interface disponible hors ligne/)).toBeInTheDocument()
+  })
+
   it('rejette une extension non audio', async () => {
     render(<App />)
     const input = document.querySelector('input[type="file"]') as HTMLInputElement
