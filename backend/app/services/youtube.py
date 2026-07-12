@@ -72,6 +72,10 @@ async def download_youtube_audio(
         _, stderr = await asyncio.wait_for(
             process.communicate(), timeout=settings.youtube_timeout_seconds
         )
+    except asyncio.CancelledError:
+        process.kill()
+        await process.wait()
+        raise
     except TimeoutError as exc:
         process.kill()
         await process.wait()
@@ -94,4 +98,3 @@ async def download_youtube_audio(
         source.unlink(missing_ok=True)
         raise YouTubeImportError("La piste YouTube est vide ou dépasse la taille maximale.")
     return source
-

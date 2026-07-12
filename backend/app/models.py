@@ -60,6 +60,7 @@ class TuningResult(BaseModel):
     classification: str
     confidence: int = Field(ge=0, le=100)
     analyzed_seconds: float
+    diagnostic: str
     explanation: str
 
 

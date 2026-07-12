@@ -17,6 +17,15 @@ import './styles.css'
 
 const ALLOWED_EXTENSIONS = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg']
 
+interface BatchItem {
+  name: string
+  status: 'waiting' | 'uploading' | 'processing' | 'completed' | 'failed' | 'stopped'
+  progress: number
+  jobId?: string
+  downloadName?: string | null
+  error?: string | null
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`
   return `${(bytes / 1024 / 1024).toFixed(1)} Mo`
@@ -25,7 +34,7 @@ function formatBytes(bytes: number): string {
 function App() {
   const [feature, setFeature] = useState<'convert' | 'analyze'>('convert')
   const [mode, setMode] = useState<'file' | 'youtube'>('file')
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [url, setUrl] = useState('')
   const [rights, setRights] = useState(false)
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('mp3')
@@ -36,7 +45,14 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [batchItems, setBatchItems] = useState<BatchItem[]>([])
+  const [batchRunning, setBatchRunning] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const batchRunningRef = useRef(false)
+  const batchCancelledRef = useRef(false)
+  const batchCurrentIdRef = useRef<string | null>(null)
+  const file = files[0] ?? null
 
   const localPreview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
   useEffect(() => () => { if (localPreview) URL.revokeObjectURL(localPreview) }, [localPreview])
@@ -46,7 +62,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!jobId) return
+    if (!jobId || batchRunningRef.current) return
     let cancelled = false
     const poll = async () => {
       try {
@@ -81,29 +97,105 @@ function App() {
 
   const working = Boolean(jobId && (!job || job.status === 'queued' || job.status === 'processing'))
   const analyzing = Boolean(analysisId && (!analysis || analysis.status === 'queued' || analysis.status === 'processing'))
-  const canSubmit = mode === 'file' ? Boolean(file) : Boolean(url.trim() && rights && capabilities?.youtube_available)
+  const canSubmit = mode === 'file' ? files.length > 0 : Boolean(url.trim() && rights && capabilities?.youtube_available)
 
-  const chooseFile = (selected?: File) => {
-    if (!selected) return
-    const extension = selected.name.split('.').pop()?.toLowerCase() ?? ''
-    if (!ALLOWED_EXTENSIONS.includes(extension)) {
-      setFile(null)
-      setError(`Format non accepté. Choisissez ${ALLOWED_EXTENSIONS.join(', ')}.`)
-      return
-    }
-    if (capabilities && selected.size > capabilities.max_upload_mb * 1024 * 1024) {
-      setFile(null)
-      setError(`Ce fichier dépasse la limite de ${capabilities.max_upload_mb} Mo.`)
-      return
+  const chooseFiles = (selected: File[]) => {
+    if (!selected.length) return
+    for (const candidate of selected) {
+      const extension = candidate.name.split('.').pop()?.toLowerCase() ?? ''
+      if (!ALLOWED_EXTENSIONS.includes(extension)) {
+        setFiles([])
+        setError(`Le fichier « ${candidate.name} » n’est pas accepté. Choisissez ${ALLOWED_EXTENSIONS.join(', ')}.`)
+        return
+      }
+      if (capabilities && candidate.size > capabilities.max_upload_mb * 1024 * 1024) {
+        setFiles([])
+        setError(`Le fichier « ${candidate.name} » dépasse la limite de ${capabilities.max_upload_mb} Mo.`)
+        return
+      }
     }
     setError(null)
-    setFile(selected)
+    setNotice(null)
+    setFiles(selected)
+  }
+
+  const chooseFile = (selected?: File) => { if (selected) chooseFiles([selected]) }
+
+  const updateBatchItem = (index: number, changes: Partial<BatchItem>) => {
+    setBatchItems((current) => current.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, ...changes } : item
+    )))
+  }
+
+  const runBatch = async () => {
+    batchRunningRef.current = true
+    setBatchRunning(true)
+    batchCancelledRef.current = false
+    setBatchItems(files.map((candidate) => ({ name: candidate.name, status: 'waiting', progress: 0 })))
+    for (let index = 0; index < files.length; index += 1) {
+      if (batchCancelledRef.current) break
+      const candidate = files[index]
+      try {
+        updateBatchItem(index, { status: 'uploading', progress: 0 })
+        const created = await uploadFile(candidate, outputFormat, (progress) => {
+          updateBatchItem(index, { progress: Math.round(progress * 0.1) })
+        })
+        batchCurrentIdRef.current = created.job_id
+        setJobId(created.job_id)
+        updateBatchItem(index, { status: 'processing', jobId: created.job_id, progress: 10 })
+        while (!batchCancelledRef.current) {
+          const currentJob = await getJob(created.job_id)
+          setJob(currentJob)
+          updateBatchItem(index, { progress: 10 + Math.round(currentJob.progress * 0.9) })
+          if (currentJob.status === 'completed') {
+            updateBatchItem(index, {
+              status: 'completed',
+              progress: 100,
+              downloadName: currentJob.download_name,
+            })
+            break
+          }
+          if (currentJob.status === 'failed') {
+            updateBatchItem(index, { status: 'failed', error: currentJob.error })
+            break
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 800))
+        }
+      } catch (caught) {
+        if (!batchCancelledRef.current) {
+          updateBatchItem(index, {
+            status: 'failed',
+            error: caught instanceof Error ? caught.message : 'Échec du traitement.',
+          })
+        }
+      }
+      batchCurrentIdRef.current = null
+    }
+    if (batchCancelledRef.current) {
+      setBatchItems((current) => current.map((item) => (
+        item.status === 'waiting' || item.status === 'processing' || item.status === 'uploading'
+          ? { ...item, status: 'stopped' }
+          : item
+      )))
+      setNotice('Traitement de la file arrêté.')
+    } else {
+      setNotice('Tous les fichiers de la file ont été traités.')
+    }
+    batchRunningRef.current = false
+    setBatchRunning(false)
+    setJobId(null)
+    setJob(null)
   }
 
   const convert = async () => {
     if (!canSubmit || working) return
     setError(null)
+    setNotice(null)
     setJob(null)
+    if (mode === 'file' && files.length > 1) {
+      await runBatch()
+      return
+    }
     try {
       let created: { job_id: string }
       if (mode === 'file' && file) {
@@ -124,7 +216,7 @@ function App() {
     const previousId = jobId
     setJobId(null)
     setJob(null)
-    setFile(null)
+    setFiles([])
     setUrl('')
     setRights(false)
     setError(null)
@@ -132,9 +224,34 @@ function App() {
     if (previousId) await deleteJob(previousId).catch(() => undefined)
   }
 
+  const stopConversion = async () => {
+    if (!jobId) return
+    await deleteJob(jobId).catch(() => undefined)
+    setJobId(null)
+    setJob(null)
+    setUploadProgress(null)
+    setNotice('Conversion arrêtée et fichiers temporaires supprimés.')
+  }
+
+  const stopBatch = async () => {
+    batchCancelledRef.current = true
+    const currentId = batchCurrentIdRef.current
+    if (currentId) await deleteJob(currentId).catch(() => undefined)
+  }
+
+  const resetBatch = async () => {
+    const ids = batchItems.flatMap((item) => item.jobId ? [item.jobId] : [])
+    await Promise.all(ids.map((id) => deleteJob(id).catch(() => undefined)))
+    setBatchItems([])
+    setFiles([])
+    setNotice(null)
+    setError(null)
+  }
+
   const analyze = async () => {
     if (!canSubmit || analyzing) return
     setError(null)
+    setNotice(null)
     setAnalysis(null)
     try {
       let created: { analysis_id: string }
@@ -159,6 +276,15 @@ function App() {
     setError(null)
     setUploadProgress(null)
     if (previousId) await deleteAnalysis(previousId).catch(() => undefined)
+  }
+
+  const stopAnalysis = async () => {
+    if (!analysisId) return
+    await deleteAnalysis(analysisId).catch(() => undefined)
+    setAnalysisId(null)
+    setAnalysis(null)
+    setUploadProgress(null)
+    setNotice('Analyse arrêtée et fichiers temporaires supprimés.')
   }
 
   const visibleProgress = uploadProgress ?? (feature === 'analyze' ? analysis?.progress : job?.progress) ?? 0
@@ -190,11 +316,12 @@ function App() {
         </nav>
 
         {serviceUnavailable && <div className="alert error" role="alert">Le serveur ne possède pas le filtre Rubber Band requis. La conversion est désactivée.</div>}
+        {notice && <div className="alert info" role="status">{notice}</div>}
         {error && <div className="alert error" role="alert">{error}</div>}
         {job?.status === 'failed' && <div className="alert error" role="alert">{job.error ?? 'La conversion a échoué.'}</div>}
         {analysis?.status === 'failed' && <div className="alert error" role="alert">{analysis.error ?? 'L’analyse a échoué.'}</div>}
 
-        {feature === 'convert' && !jobId && (
+        {feature === 'convert' && !jobId && batchItems.length === 0 && (
           <>
             <div className="tabs" role="tablist" aria-label="Source du morceau">
               <button role="tab" aria-selected={mode === 'file'} className={mode === 'file' ? 'active' : ''} onClick={() => setMode('file')}>Fichier audio</button>
@@ -208,12 +335,12 @@ function App() {
                   className={`drop-zone ${file ? 'has-file' : ''}`}
                   onClick={() => inputRef.current?.click()}
                   onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]) }}
+                  onDrop={(event) => { event.preventDefault(); chooseFiles(Array.from(event.dataTransfer.files)) }}
                 >
                   <span className="upload-icon" aria-hidden="true">↥</span>
-                  {file ? <><strong>{file.name}</strong><span>{formatBytes(file.size)} · Cliquer pour remplacer</span></> : <><strong>Déposez votre morceau ici</strong><span>ou touchez pour parcourir vos fichiers</span></>}
+                  {file ? <><strong>{files.length > 1 ? `${files.length} morceaux sélectionnés` : file.name}</strong><span>{files.length > 1 ? files.map((item) => item.name).join(' · ') : `${formatBytes(file.size)} · Cliquer pour remplacer`}</span></> : <><strong>Déposez un ou plusieurs morceaux ici</strong><span>ils seront convertis successivement</span></>}
                 </button>
-                <input ref={inputRef} className="sr-only" type="file" accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,audio/*" onChange={(event) => chooseFile(event.target.files?.[0])} />
+                <input ref={inputRef} className="sr-only" type="file" multiple accept=".mp3,.wav,.flac,.m4a,.aac,.ogg,audio/*" onChange={(event) => chooseFiles(Array.from(event.target.files ?? []))} />
                 <p className="formats-note">MP3, WAV, FLAC, M4A, AAC ou OGG{capabilities ? ` · ${capabilities.max_upload_mb} Mo maximum` : ''}</p>
                 {localPreview && <div className="preview"><span>Original</span><audio controls src={localPreview}>Votre navigateur ne peut pas lire ce fichier.</audio></div>}
               </div>
@@ -249,6 +376,7 @@ function App() {
             <p className="progress-value">{visibleProgress}<small>%</small></p>
             <progress max="100" value={visibleProgress}>{visibleProgress}%</progress>
             <p className="patience">Gardez cette page ouverte pendant le traitement.</p>
+            {(job?.status === 'queued' || job?.status === 'processing') && <button className="stop-button" onClick={() => void stopConversion()}>■ Arrêter la conversion</button>}
             {job?.status === 'failed' && <button className="secondary-button" onClick={() => void reset()}>Réessayer avec un autre morceau</button>}
           </section>
         )}
@@ -261,8 +389,24 @@ function App() {
             <p>Hauteur déplacée de −31,77 cents, durée et tempo préservés.</p>
             <div className="preview result"><span>Résultat 432 Hz</span><audio controls src={downloadUrl(job.job_id)}>Votre navigateur ne peut pas lire ce fichier.</audio></div>
             <a className="primary-button" href={downloadUrl(job.job_id)} download={job.download_name ?? undefined}><span>Télécharger le fichier</span><span aria-hidden="true">↓</span></a>
-            <button className="text-button" onClick={() => void reset()}>Convertir un autre morceau</button>
+            <button className="secondary-button new-track-button" onClick={() => void reset()}>＋ Convertir un autre morceau</button>
             {job.expires_at && <small className="expiry">Téléchargement disponible temporairement.</small>}
+          </section>
+        )}
+
+        {feature === 'convert' && batchItems.length > 0 && (
+          <section className="batch-panel" aria-live="polite">
+            <div className="batch-heading"><div><p className="eyebrow">FILE DE CONVERSION</p><h2>{batchItems.filter((item) => item.status === 'completed').length} / {batchItems.length} terminés</h2></div>{batchRunning && <button className="stop-button compact" onClick={() => void stopBatch()}>■ Tout arrêter</button>}</div>
+            <div className="batch-list">
+              {batchItems.map((item, index) => (
+                <article key={`${item.name}-${index}`} className={`batch-item status-${item.status}`}>
+                  <div className="batch-state" aria-hidden="true">{item.status === 'completed' ? '✓' : item.status === 'failed' ? '!' : item.status === 'stopped' ? '■' : index + 1}</div>
+                  <div className="batch-details"><strong>{item.name}</strong><span>{item.status === 'waiting' ? 'En attente' : item.status === 'uploading' ? 'Envoi du fichier' : item.status === 'processing' ? `Conversion · ${item.progress}%` : item.status === 'completed' ? 'Terminé' : item.status === 'stopped' ? 'Arrêté' : item.error ?? 'Échec'}</span>{['uploading','processing'].includes(item.status) && <progress max="100" value={item.progress}>{item.progress}%</progress>}</div>
+                  {item.status === 'completed' && item.jobId && <a className="batch-download" href={downloadUrl(item.jobId)} download={item.downloadName ?? undefined} aria-label={`Télécharger ${item.name}`}>↓</a>}
+                </article>
+              ))}
+            </div>
+            {!batchRunning && <button className="secondary-button new-track-button" onClick={() => void resetBatch()}>＋ Convertir d’autres morceaux</button>}
           </section>
         )}
 
@@ -310,6 +454,7 @@ function App() {
             <p className="progress-value">{visibleProgress}<small>%</small></p>
             <progress max="100" value={visibleProgress}>{visibleProgress}%</progress>
             <p className="patience">Recherche d’une référence commune dans plusieurs passages.</p>
+            {(analysis?.status === 'queued' || analysis?.status === 'processing') && <button className="stop-button" onClick={() => void stopAnalysis()}>■ Arrêter l’analyse</button>}
             {analysis?.status === 'failed' && <button className="secondary-button" onClick={() => void resetAnalysis()}>Analyser un autre morceau</button>}
           </section>
         )}
@@ -330,7 +475,7 @@ function App() {
             </div>
             <div className="confidence-bar"><i style={{ width: `${analysis.result.confidence}%` }} /></div>
             {analysis.result.classification === '440' && <button className="primary-button" onClick={() => setFeature('convert')}><span>Convertir ce morceau en 432 Hz</span><span aria-hidden="true">→</span></button>}
-            <button className="text-button" onClick={() => void resetAnalysis()}>Analyser un autre morceau</button>
+            <button className="secondary-button new-track-button" onClick={() => void resetAnalysis()}>＋ Analyser un autre morceau</button>
           </section>
         )}
 

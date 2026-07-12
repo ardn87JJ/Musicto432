@@ -55,14 +55,19 @@ async def _extract_segment(path: Path, start: float, duration: int) -> np.ndarra
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await process.communicate()
+    try:
+        stdout, stderr = await process.communicate()
+    except asyncio.CancelledError:
+        process.kill()
+        await process.wait()
+        raise
     if process.returncode != 0 or not stdout:
         detail = stderr.decode(errors="replace").strip()
         raise TuningAnalysisError(f"Impossible d’extraire le signal à analyser. {detail[:180]}")
     return np.frombuffer(stdout, dtype="<f4").copy()
 
 
-def _estimate_tuning(samples: np.ndarray) -> tuple[float, int, int]:
+def _estimate_tuning(samples: np.ndarray) -> tuple[float, int, int, float, float]:
     if samples.size < WINDOW_SIZE:
         samples = np.pad(samples, (0, WINDOW_SIZE - samples.size))
     window = np.hanning(WINDOW_SIZE).astype(np.float32)
@@ -71,22 +76,31 @@ def _estimate_tuning(samples: np.ndarray) -> tuple[float, int, int]:
     allowed_indices = np.flatnonzero(allowed)
     histogram = np.zeros(201, dtype=np.float64)
     accepted_peaks = 0
+    active_frames = 0
+    stable_frames = 0
+    flatness_values: list[float] = []
 
     for start in range(0, samples.size - WINDOW_SIZE + 1, HOP_SIZE):
         frame = samples[start : start + WINDOW_SIZE]
         if float(np.sqrt(np.mean(frame * frame))) < 0.003:
             continue
+        active_frames += 1
         spectrum = np.abs(np.fft.rfft(frame * window))
         region = spectrum[allowed]
         if region.size < 3:
             continue
         threshold = max(float(np.percentile(region, 90)), float(region.max()) * 0.025)
+        flatness = float(
+            np.exp(np.mean(np.log(region + 1e-12))) / max(float(np.mean(region)), 1e-12)
+        )
+        flatness_values.append(flatness)
         local = region[1:-1]
         peaks = np.flatnonzero(
             (local > region[:-2]) & (local >= region[2:]) & (local >= threshold)
         ) + 1
         if peaks.size == 0:
             continue
+        stable_frames += 1
         strongest = peaks[np.argsort(region[peaks])[-18:]]
         for relative_index in strongest:
             index = int(allowed_indices[relative_index])
@@ -101,10 +115,25 @@ def _estimate_tuning(samples: np.ndarray) -> tuple[float, int, int]:
             histogram[bin_index] += weight
             accepted_peaks += 1
 
+    stable_ratio = stable_frames / max(active_frames, 1)
+    mean_flatness = float(np.mean(flatness_values)) if flatness_values else 1.0
     if accepted_peaks < 12 or histogram.sum() <= 0:
-        raise TuningAnalysisError(
-            "Le morceau ne contient pas assez de notes stables pour estimer son accordage."
-        )
+        if mean_flatness >= 0.22:
+            detail = (
+                "Le morceau est trop bruité ou percussif et ne contient pas assez "
+                "de notes tenues."
+            )
+        elif stable_ratio < 0.25:
+            detail = (
+                "Les hauteurs sont trop courtes ou instables pour déterminer "
+                "un accordage fiable."
+            )
+        else:
+            detail = (
+                "Le morceau ne contient pas assez de notes identifiables pour "
+                "estimer son accordage."
+            )
+        raise TuningAnalysisError(detail)
     kernel_x = np.arange(-12, 13)
     kernel = np.exp(-0.5 * (kernel_x / 4) ** 2)
     extended = np.concatenate([histogram[-24:-1], histogram, histogram[1:24]])
@@ -113,7 +142,7 @@ def _estimate_tuning(samples: np.ndarray) -> tuple[float, int, int]:
     offset = peak_index / 2 - 50
     peak_share = float(smoothed[peak_index] / max(smoothed.sum(), 1e-9))
     confidence = round(np.clip((peak_share - 0.006) / 0.035 * 100, 5, 99))
-    return offset, confidence, accepted_peaks
+    return offset, confidence, accepted_peaks, stable_ratio, mean_flatness
 
 
 async def analyze_tuning(
@@ -128,21 +157,43 @@ async def analyze_tuning(
         segments.append(await _extract_segment(path, start, settings.analysis_segment_seconds))
         progress_callback(15 + round((index + 1) / len(starts) * 45))
     samples = np.concatenate(segments)
-    offset, confidence, _ = await asyncio.to_thread(_estimate_tuning, samples)
+    offset, confidence, _, stable_ratio, mean_flatness = await asyncio.to_thread(
+        _estimate_tuning, samples
+    )
     estimated = 440 * 2 ** (offset / 1200)
     distance_440 = _circular_distance(offset, 0)
     distance_432 = _circular_distance(offset, REFERENCE_432_OFFSET)
     if confidence < 25:
         classification = "uncertain"
-        explanation = "L’accordage n’a pas pu être déterminé avec suffisamment de confiance."
+        if mean_flatness >= 0.18:
+            diagnostic = "percussive"
+            explanation = (
+                "Résultat incertain : le morceau est principalement percussif ou bruité, "
+                "avec trop peu de notes tenues."
+            )
+        elif stable_ratio < 0.35:
+            diagnostic = "unstable"
+            explanation = (
+                "Résultat incertain : les notes varient trop rapidement ou sont trop courtes "
+                "pour révéler une référence stable."
+            )
+        else:
+            diagnostic = "mixed"
+            explanation = (
+                "Résultat incertain : plusieurs références d’accordage semblent coexister "
+                "dans le morceau."
+            )
     elif distance_432 <= 7 and distance_432 < distance_440:
         classification = "432"
+        diagnostic = "stable"
         explanation = "Le morceau semble accordé autour de La = 432 Hz."
     elif distance_440 <= 7 and distance_440 <= distance_432:
         classification = "440"
+        diagnostic = "stable"
         explanation = "Le morceau semble accordé autour de La = 440 Hz."
     else:
         classification = "other"
+        diagnostic = "stable_other"
         explanation = f"Le morceau semble utiliser une référence proche de {estimated:.1f} Hz."
     progress_callback(100)
     return TuningResult(
@@ -152,5 +203,6 @@ async def analyze_tuning(
         classification=classification,
         confidence=confidence,
         analyzed_seconds=round(samples.size / SAMPLE_RATE, 1),
+        diagnostic=diagnostic,
         explanation=explanation,
     )

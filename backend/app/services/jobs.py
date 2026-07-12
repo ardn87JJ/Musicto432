@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -151,6 +152,8 @@ class JobManager:
         record = await self.get(job_id)
         if record.task and not record.task.done():
             record.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await record.task
         shutil.rmtree(record.directory, ignore_errors=True)
         record.status = JobStatus.DELETED
         record.result_path = None

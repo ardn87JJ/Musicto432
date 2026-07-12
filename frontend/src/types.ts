@@ -29,6 +29,7 @@ export interface TuningResult {
   classification: '432' | '440' | 'other' | 'uncertain'
   confidence: number
   analyzed_seconds: number
+  diagnostic: string
   explanation: string
 }
 

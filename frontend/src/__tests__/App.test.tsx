@@ -22,7 +22,7 @@ describe('App', () => {
   it('affiche le parcours fichier par défaut', async () => {
     render(<App />)
     expect(screen.getByRole('heading', { name: /Convertisseur musical 432 Hz/i })).toBeInTheDocument()
-    expect(screen.getByText('Déposez votre morceau ici')).toBeInTheDocument()
+    expect(screen.getByText('Déposez un ou plusieurs morceaux ici')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Convertir en 432 Hz/ })).toBeDisabled()
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/capabilities'))
   })
@@ -32,7 +32,19 @@ describe('App', () => {
     const input = document.querySelector('input[type="file"]') as HTMLInputElement
     const invalid = new File(['danger'], 'virus.exe', { type: 'application/octet-stream' })
     fireEvent.change(input, { target: { files: [invalid] } })
-    expect(await screen.findByRole('alert')).toHaveTextContent('Format non accepté')
+    expect(await screen.findByRole('alert')).toHaveTextContent('n’est pas accepté')
+  })
+
+  it('accepte plusieurs fichiers dans une file successive', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await user.upload(input, [
+      new File(['audio-a'], 'premier.mp3', { type: 'audio/mpeg' }),
+      new File(['audio-b'], 'second.mp3', { type: 'audio/mpeg' }),
+    ])
+    expect(screen.getByText('2 morceaux sélectionnés')).toBeInTheDocument()
+    expect(screen.getByText(/premier.mp3.*second.mp3/)).toBeInTheDocument()
   })
 
   it('exige la confirmation des droits pour YouTube', async () => {
@@ -115,6 +127,7 @@ describe('App', () => {
             classification: '432',
             confidence: 84,
             analyzed_seconds: 60,
+            diagnostic: 'stable',
             explanation: 'Le morceau semble accordé autour de La = 432 Hz.',
           },
         }),

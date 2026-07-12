@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 from pathlib import Path
 
@@ -34,3 +35,12 @@ async def test_expiration_removes_result(tmp_path: Path) -> None:
     with pytest.raises(JobNotFoundError):
         await manager.get(record.job_id)
 
+
+@pytest.mark.asyncio
+async def test_manual_deletion_cancels_running_task(tmp_path: Path) -> None:
+    manager = JobManager(Settings(temp_root=tmp_path), rubberband_ready=True)
+    record = await manager.create(OutputFormat.WAV, "long.wav")
+    record.task = asyncio.create_task(asyncio.sleep(60))
+    await manager.delete(record.job_id)
+    assert record.task.cancelled()
+    assert not record.directory.exists()

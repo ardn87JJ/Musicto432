@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.3.0 — 2026-07-12
+
+- Ajoute une file de conversion pour traiter plusieurs fichiers successivement.
+- Ajoute l’arrêt réel d’une conversion, d’une file ou d’une analyse en cours.
+- Rend l’action « Convertir un autre morceau » nettement plus visible.
+- Distingue les analyses incertaines percussives, instables ou mélangeant plusieurs références.
+- Ajoute un banc de calibration sur des morceaux réels de référence fournis légalement.
+- Les installateurs futurs enregistrent automatiquement les versions appliquées dans Git.
+
 ## 0.2.0 — 2026-07-12
 
 - Ajoute l’onglet « Vérifier l’accordage » pour les fichiers locaux et les liens YouTube.

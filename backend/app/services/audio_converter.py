@@ -74,6 +74,12 @@ async def convert_audio(
     reader = asyncio.create_task(read_progress())
     try:
         await asyncio.wait_for(process.wait(), timeout=settings.ffmpeg_timeout_seconds)
+    except asyncio.CancelledError:
+        process.kill()
+        await process.wait()
+        reader.cancel()
+        output_path.unlink(missing_ok=True)
+        raise
     except TimeoutError as exc:
         process.kill()
         await process.wait()
