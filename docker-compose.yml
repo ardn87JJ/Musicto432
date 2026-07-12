@@ -1,0 +1,39 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      TEMP_ROOT: /tmp/musicto432
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-250}
+      MAX_AUDIO_DURATION_SECONDS: ${MAX_AUDIO_DURATION_SECONDS:-3600}
+      FILE_TTL_MINUTES: ${FILE_TTL_MINUTES:-60}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}
+      REQUEST_LIMIT_PER_MINUTE: ${REQUEST_LIMIT_PER_MINUTE:-30}
+      YOUTUBE_ENABLED: ${YOUTUBE_ENABLED:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    tmpfs:
+      - /tmp/musicto432:size=2G,mode=1770
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+

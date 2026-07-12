@@ -1,0 +1,193 @@
+import asyncio
+import contextlib
+import shutil
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Annotated
+
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+
+from app.config import get_settings
+from app.models import (
+    CapabilitiesResponse,
+    HealthResponse,
+    JobCreated,
+    JobPublic,
+    JobStatus,
+    OutputFormat,
+    YouTubeRequest,
+)
+from app.rate_limit import RateLimitMiddleware
+from app.services.jobs import JobManager, JobNotFoundError
+from app.services.media import MediaValidationError, sanitize_filename, validate_extension
+from app.services.system import command_available, rubberband_available, temp_directory_accessible
+
+settings = get_settings()
+
+
+async def cleanup_loop(app: FastAPI) -> None:
+    while True:
+        await asyncio.sleep(60)
+        await app.state.jobs.cleanup_expired()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings.temp_root.mkdir(parents=True, exist_ok=True)
+    rubberband = await rubberband_available()
+    app.state.rubberband = rubberband
+    app.state.jobs = JobManager(settings, rubberband)
+    app.state.cleanup_task = asyncio.create_task(cleanup_loop(app))
+    yield
+    app.state.cleanup_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await app.state.cleanup_task
+    await app.state.jobs.shutdown()
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    docs_url="/api/docs" if settings.debug else None,
+    redoc_url=None,
+    lifespan=lifespan,
+)
+app.add_middleware(RateLimitMiddleware, limit_per_minute=settings.request_limit_per_minute)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next: object):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Cache-Control"] = (
+        "no-store" if request.url.path.startswith("/api/jobs") else "no-cache"
+    )
+    return response
+
+
+@app.exception_handler(JobNotFoundError)
+async def job_not_found(_: Request, __: JobNotFoundError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": "Traitement introuvable ou expiré."})
+
+
+@app.get("/api/health", response_model=HealthResponse)
+async def health() -> HealthResponse:
+    checks = {
+        "ffmpeg": await command_available("ffmpeg"),
+        "ffprobe": await command_available("ffprobe"),
+        "rubberband": await rubberband_available(),
+        "temporary_directory": temp_directory_accessible(settings.temp_root),
+    }
+    return HealthResponse(
+        status="ok" if all(checks.values()) else "degraded",
+        version=settings.app_version,
+        checks=checks,
+    )
+
+
+@app.get("/api/capabilities", response_model=CapabilitiesResponse)
+async def capabilities() -> CapabilitiesResponse:
+    rubberband = await rubberband_available()
+    return CapabilitiesResponse(
+        input_formats=["mp3", "wav", "flac", "m4a", "aac", "ogg"],
+        output_formats=[item.value for item in OutputFormat],
+        max_upload_mb=settings.max_upload_mb,
+        max_duration_seconds=settings.max_audio_duration_seconds,
+        youtube_available=settings.youtube_enabled and shutil.which("yt-dlp") is not None,
+        rubberband_available=rubberband,
+    )
+
+
+async def save_upload(upload: UploadFile, target: Path) -> None:
+    size = 0
+    try:
+        with target.open("xb") as destination:
+            while chunk := await upload.read(1024 * 1024):
+                size += len(chunk)
+                if size > settings.max_upload_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail=f"Le fichier dépasse la limite de {settings.max_upload_mb} Mo.",
+                    )
+                destination.write(chunk)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    finally:
+        await upload.close()
+    if size == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Le fichier envoyé est vide.")
+
+
+@app.post("/api/jobs/upload", response_model=JobCreated, status_code=202)
+async def upload_job(
+    file: Annotated[UploadFile, File()],
+    output_format: Annotated[OutputFormat, Form()] = OutputFormat.MP3,
+) -> JobCreated:
+    filename = sanitize_filename(file.filename or "audio")
+    try:
+        suffix = validate_extension(filename)
+    except MediaValidationError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    record = await app.state.jobs.create(output_format, filename)
+    source_path = record.directory / f"source{suffix}"
+    try:
+        await save_upload(file, source_path)
+    except Exception:
+        await app.state.jobs.delete(record.job_id)
+        raise
+    app.state.jobs.start_file(record, source_path)
+    return JobCreated(job_id=record.job_id, status=JobStatus.QUEUED)
+
+
+@app.post("/api/jobs/youtube", response_model=JobCreated, status_code=202)
+async def youtube_job(payload: YouTubeRequest) -> JobCreated:
+    if not settings.youtube_enabled or shutil.which("yt-dlp") is None:
+        raise HTTPException(status_code=503, detail="L’import YouTube est indisponible.")
+    if not payload.rights_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Vous devez confirmer disposer des droits nécessaires.",
+        )
+    record = await app.state.jobs.create(payload.output_format, "youtube-audio")
+    app.state.jobs.start_youtube(record, payload.url)
+    return JobCreated(job_id=record.job_id, status=JobStatus.QUEUED)
+
+
+@app.get("/api/jobs/{job_id}", response_model=JobPublic)
+async def get_job(job_id: str) -> JobPublic:
+    return (await app.state.jobs.get(job_id)).public()
+
+
+@app.get("/api/jobs/{job_id}/download")
+async def download_job(job_id: str) -> FileResponse:
+    record = await app.state.jobs.get(job_id)
+    if record.status != JobStatus.COMPLETED or not record.result_path:
+        raise HTTPException(status_code=409, detail="Le résultat n’est pas encore disponible.")
+    if not record.result_path.is_file():
+        raise HTTPException(status_code=410, detail="Le fichier a expiré.")
+    media_types = {"mp3": "audio/mpeg", "wav": "audio/wav", "flac": "audio/flac"}
+    return FileResponse(
+        record.result_path,
+        media_type=media_types[record.output_format.value],
+        filename=record.download_name,
+    )
+
+
+@app.delete("/api/jobs/{job_id}", status_code=204)
+async def delete_job(job_id: str) -> None:
+    await app.state.jobs.delete(job_id)

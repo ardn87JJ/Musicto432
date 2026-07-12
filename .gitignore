@@ -1,0 +1,38 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# JavaScript
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.npm-cache/
+
+# Audio and temporary output
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.ogg
+*.webm
+*.part
+tmp/
+temp/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
