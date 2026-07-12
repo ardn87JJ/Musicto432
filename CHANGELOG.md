@@ -1,5 +1,10 @@
 # Journal des versions
 
+## 0.1.1 — 2026-07-12
+
+- Corrige les permissions du stockage temporaire avec Podman/Docker Compose.
+- Le healthcheck échoue désormais si l’API signale un stockage temporaire inaccessible.
+
 ## 0.1.0 — 2026-07-12
 
 - Première version fonctionnelle du convertisseur 440 → 432 Hz.
@@ -9,4 +14,3 @@
 - Import YouTube optionnel avec confirmation des droits.
 - Nettoyage automatique, limites, contrôles FFprobe et protections SSRF.
 - Interface responsive claire/sombre et déploiement Docker Compose.
-

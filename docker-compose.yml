@@ -12,10 +12,12 @@ services:
       YOUTUBE_ENABLED: ${YOUTUBE_ENABLED:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
     tmpfs:
-      - /tmp/musicto432:size=2G,mode=1770
+      # Le backend s'exécute avec l'UID non-root 10001. Le sticky bit protège
+      # les tâches entre elles tout en autorisant la création de leurs dossiers.
+      - /tmp/musicto432:size=2G,mode=1777
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import json,urllib.request; r=json.load(urllib.request.urlopen('http://localhost:8000/api/health',timeout=3)); assert r['status']=='ok',r"]
       interval: 20s
       timeout: 5s
       retries: 3
@@ -36,4 +38,3 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
-
