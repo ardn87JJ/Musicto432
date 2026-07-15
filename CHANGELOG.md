@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 0.7.0 — 2026-07-13
+
+- Ajoute le Blueprint Render pour héberger publiquement FastAPI et FFmpeg.
+- Ajoute le déploiement automatique du frontend sur GitHub Pages.
+- Configure le chemin public `/Musicto432/` pour les scripts, le logo et le favicon.
+- Permet de relier Pages au backend avec la variable GitHub `VITE_API_URL`.
+- Limite le nettoyage des anciens service workers au seul périmètre MusicTo432.
+
 ## 0.6.1 — 2026-07-13
 
 - Maintient le titre « Convertisseur musical 432 Hz » sur une ligne sur ordinateur.

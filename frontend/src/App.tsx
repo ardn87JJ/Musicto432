@@ -18,6 +18,7 @@ import type { Analysis, Capabilities, Job, OutputFormat, YouTubeMetadata } from 
 import './styles.css'
 
 const ALLOWED_EXTENSIONS = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg']
+const BASE_URL = import.meta.env.BASE_URL
 
 interface BatchItem {
   name: string
@@ -378,7 +379,7 @@ function App() {
       <div className="ambient ambient-two" />
       <section className="app-card" aria-labelledby="page-title">
         <header className="hero">
-          <img className="brand-visual" src="/brand/musicto432-hero.webp" alt="MusicTo432, accordage musical de 440 Hz vers 432 Hz" />
+          <img className="brand-visual" src={`${BASE_URL}brand/musicto432-hero.webp`} alt="MusicTo432, accordage musical de 440 Hz vers 432 Hz" />
           <p className="eyebrow">MUSICAL TUNING TOOL</p>
           <h1 id="page-title">{feature === 'convert' ? <>Convertisseur musical <em>432 Hz</em></> : <>Vérifier <em>l’accordage</em></>}</h1>
           <p className="intro">{feature === 'convert' ? 'Décalez la hauteur de votre morceau de 440 vers 432 Hz, tout en conservant son tempo et sa durée.' : 'Estimez la référence d’accordage de votre morceau et découvrez s’il se rapproche de 432 Hz, de 440 Hz ou d’une autre valeur.'}</p>

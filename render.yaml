@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: musicto432-api
+    runtime: docker
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: TEMP_ROOT
+        value: /tmp/musicto432
+      - key: MAX_UPLOAD_MB
+        value: 250
+      - key: MAX_AUDIO_DURATION_SECONDS
+        value: 3600
+      - key: FILE_TTL_MINUTES
+        value: 60
+      - key: MAX_CONCURRENT_JOBS
+        value: 1
+      - key: REQUEST_LIMIT_PER_MINUTE
+        value: 30
+      - key: YOUTUBE_ENABLED
+        value: true
+      - key: CORS_ORIGINS
+        value: https://ardn87jj.github.io

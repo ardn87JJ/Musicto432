@@ -8,8 +8,13 @@ createRoot(document.getElementById('root')!).render(
 
 // Nettoie les anciens éléments PWA installés par les versions 0.5/0.6.
 if ('serviceWorker' in navigator) {
+  const applicationScope = new URL(import.meta.env.BASE_URL, window.location.origin).href
   void navigator.serviceWorker.getRegistrations().then((registrations) => (
-    Promise.all(registrations.map((registration) => registration.unregister()))
+    Promise.all(
+      registrations
+        .filter((registration) => registration.scope.startsWith(applicationScope))
+        .map((registration) => registration.unregister()),
+    )
   ))
 }
 if ('caches' in window) {

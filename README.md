@@ -101,7 +101,7 @@ Le test audio génère lui-même une sinusoïde libre de droits à 440 Hz, la co
 
 GitHub peut héberger le dépôt et exécuter la CI. GitHub Pages peut éventuellement servir le build statique du frontend, mais **ne peut pas exécuter FastAPI, FFmpeg ou yt-dlp**. Le backend doit être déployé sur un service capable d’exécuter un conteneur et de fournir du stockage temporaire.
 
-Voir [Architecture](docs/ARCHITECTURE.md), [Déploiement](docs/DEPLOYMENT.md), [Sécurité](docs/SECURITY.md), [Traitement audio](docs/AUDIO_PROCESSING.md), [Calibration](docs/CALIBRATION.md), [Droit et usage](docs/LEGAL_AND_USAGE.md) et [Mises à jour](docs/UPDATE_WORKFLOW.md).
+Voir [Architecture](docs/ARCHITECTURE.md), [Déploiement local](docs/DEPLOYMENT.md), [Déploiement public Render + Pages](docs/PUBLIC_DEPLOYMENT.md), [Sécurité](docs/SECURITY.md), [Traitement audio](docs/AUDIO_PROCESSING.md), [Calibration](docs/CALIBRATION.md), [Droit et usage](docs/LEGAL_AND_USAGE.md) et [Mises à jour](docs/UPDATE_WORKFLOW.md).
 
 ## Limite essentielle
 
